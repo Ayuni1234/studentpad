@@ -1,0 +1,689 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../../core/constants/app_constants.dart';
+import '../../../core/services/supabase_service.dart';
+import '../../../core/widgets/app_button.dart';
+import '../../listings/presentation/my_listings_screen.dart';
+import 'safety_screen.dart';
+import 'verification_screen.dart';
+import 'welcome_screen.dart';
+
+const _forest = Color(0xFF134E3F);
+const _sage = Color(0xFFE8F0EC);
+const _canvas = Color(0xFFF9FBF9);
+
+class ProfileScreen extends StatefulWidget {
+  const ProfileScreen({super.key});
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _minimumBudget = TextEditingController();
+  final _maximumBudget = TextEditingController();
+  final _bio = TextEditingController();
+  final _otherUniversity = TextEditingController();
+
+  bool _loading = true;
+  bool _saving = false;
+  String? _loadError;
+  String? _fullName;
+  String? _university;
+  String _universityOption = 'Other';
+  bool _isVerified = false;
+  double _cleanlinessScore = 3;
+  String _sleepSchedule = 'Night owl';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  @override
+  void dispose() {
+    _minimumBudget.dispose();
+    _maximumBudget.dispose();
+    _bio.dispose();
+    _otherUniversity.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadProfile() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = 'Sign in to view and edit your profile.';
+      });
+      return;
+    }
+
+    try {
+      final account = await supabase
+          .from('users')
+          .select('full_name, university, is_verified')
+          .eq('user_id', user.id)
+          .maybeSingle();
+      final profile = await supabase
+          .from('profiles')
+          .select(
+              'budget_min_ghs, budget_max_ghs, cleanliness_score, sleep_schedule, bio')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+      if (!mounted) return;
+      final university = account?['university'] as String?;
+      final knownUniversity = university != null &&
+              AppConstants.ghanaianUniversities.contains(university)
+          ? university
+          : null;
+      setState(() {
+        _fullName = account?['full_name'] as String? ??
+            user.userMetadata?['full_name'] as String?;
+        _university = university;
+        _universityOption = knownUniversity ?? 'Other';
+        _otherUniversity.text = knownUniversity == null ? university ?? '' : '';
+        _isVerified = account?['is_verified'] == true;
+        _minimumBudget.text = _displayBudget(profile?['budget_min_ghs']);
+        _maximumBudget.text = _displayBudget(profile?['budget_max_ghs']);
+        _bio.text = profile?['bio'] as String? ?? '';
+        _cleanlinessScore =
+            (profile?['cleanliness_score'] as num?)?.toDouble() ?? 3;
+        final sleep = profile?['sleep_schedule'] as String?;
+        _sleepSchedule =
+            const ['Early bird', 'Night owl', 'It varies'].contains(sleep)
+                ? sleep!
+                : 'Night owl';
+        _loading = false;
+        _loadError = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = _friendlyError(error);
+      });
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    if (_saving || !(_formKey.currentState?.validate() ?? false)) return;
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showMessage('Sign in before saving your preferences.');
+      return;
+    }
+    final university = _universityOption == 'Other'
+        ? _otherUniversity.text.trim()
+        : _universityOption;
+    if (university.isEmpty || university.length > 160) {
+      _showMessage(university.isEmpty
+          ? 'Add your university to help us find compatible students.'
+          : 'Keep the university name under 160 characters.');
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      // profiles.user_id references public.users, which may not exist for a
+      // newly registered Auth user yet.
+      final account = await supabase
+          .from('users')
+          .select('user_id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+      if (account == null) {
+        final metadataName = user.userMetadata?['full_name'] as String?;
+        try {
+          await supabase.from('users').insert({
+            'user_id': user.id,
+            'full_name': metadataName,
+            'university': university,
+          });
+        } on PostgrestException catch (error) {
+          // If another request created the account row at the same time,
+          // continue and save the preferences against that row.
+          if (error.code != '23505') rethrow;
+          await supabase
+              .from('users')
+              .update({'university': university}).eq('user_id', user.id);
+        }
+      } else {
+        await supabase
+            .from('users')
+            .update({'university': university}).eq('user_id', user.id);
+      }
+
+      final minValue = _minimumBudget.text.trim().isEmpty
+          ? null
+          : double.parse(_minimumBudget.text.trim());
+      final maxValue = _maximumBudget.text.trim().isEmpty
+          ? null
+          : double.parse(_maximumBudget.text.trim());
+
+      await supabase.from('profiles').upsert(
+        {
+          'user_id': user.id,
+          'budget_min_ghs': minValue,
+          'budget_max_ghs': maxValue,
+          'cleanliness_score': _cleanlinessScore.round(),
+          'sleep_schedule': _sleepSchedule,
+          'bio': _bio.text.trim().isEmpty ? null : _bio.text.trim(),
+        },
+        onConflict: 'user_id',
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _loadError = null;
+        _university = university;
+        _universityOption =
+            AppConstants.ghanaianUniversities.contains(university)
+                ? university
+                : 'Other';
+        _otherUniversity.text = _universityOption == 'Other' ? university : '';
+      });
+      _showMessage('Your profile and lifestyle preferences are saved.');
+    } catch (error) {
+      if (mounted) {
+        _showMessage('Could not save preferences. ${_friendlyError(error)}');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  String? _validateMinimum(String? rawValue) {
+    final value = rawValue?.trim() ?? '';
+    final maximum = _maximumBudget.text.trim();
+    if (value.isEmpty) {
+      return maximum.isEmpty ? null : 'Enter a minimum budget.';
+    }
+    final minimum = double.tryParse(value);
+    if (minimum == null || !minimum.isFinite || minimum < 0) {
+      return 'Enter a valid amount of GHS 0 or more.';
+    }
+    final maximumValue = double.tryParse(maximum);
+    if (maximum.isNotEmpty && maximumValue != null && minimum > maximumValue) {
+      return 'Minimum must be below the maximum.';
+    }
+    return null;
+  }
+
+  String? _validateMaximum(String? rawValue) {
+    final value = rawValue?.trim() ?? '';
+    final minimum = _minimumBudget.text.trim();
+    if (value.isEmpty) {
+      return minimum.isEmpty ? null : 'Enter a maximum budget.';
+    }
+    final maximum = double.tryParse(value);
+    if (maximum == null || !maximum.isFinite || maximum < 0) {
+      return 'Enter a valid amount of GHS 0 or more.';
+    }
+    final minimumValue = double.tryParse(minimum);
+    if (minimum.isNotEmpty && minimumValue != null && minimumValue > maximum) {
+      return 'Maximum must be above the minimum.';
+    }
+    return null;
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _signOut() async {
+    try {
+      await supabase.auth.signOut();
+      if (!mounted) return;
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+        (_) => false,
+      );
+    } on AuthException catch (error) {
+      if (mounted) _showMessage(error.message);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: _canvas,
+        appBar: AppBar(
+          title: const Text('Your profile',
+              style: TextStyle(fontWeight: FontWeight.w800)),
+          backgroundColor: _canvas,
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator(color: _forest))
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+                children: [
+                  _profileHeader(),
+                  const SizedBox(height: 22),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Lifestyle preferences',
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Reload profile',
+                        onPressed: _saving ? null : () => _loadProfile(),
+                        icon: const Icon(Icons.refresh_rounded, color: _forest),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Help us find roommates whose routines and budget fit yours.',
+                    style: TextStyle(color: Colors.black54, height: 1.4),
+                  ),
+                  if (_loadError != null) ...[
+                    const SizedBox(height: 14),
+                    _errorCard(_loadError!),
+                  ],
+                  const SizedBox(height: 18),
+                  Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _sectionTitle(Icons.school_outlined, 'University'),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          initialValue: _universityOption,
+                          isExpanded: true,
+                          items: [
+                            ...AppConstants.ghanaianUniversities.map(
+                              (university) => DropdownMenuItem(
+                                value: university,
+                                child: Text(university,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis),
+                              ),
+                            ),
+                            const DropdownMenuItem(
+                                value: 'Other',
+                                child: Text('Other university')),
+                          ],
+                          onChanged: _loadError != null || _saving
+                              ? null
+                              : (value) {
+                                  if (value == null) return;
+                                  setState(() => _universityOption = value);
+                                  _formKey.currentState?.validate();
+                                },
+                        ),
+                        if (_universityOption == 'Other') ...[
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: _otherUniversity,
+                            enabled: _loadError == null && !_saving,
+                            textCapitalization: TextCapitalization.words,
+                            maxLength: 160,
+                            validator: (value) {
+                              if (_universityOption != 'Other') return null;
+                              final name = value?.trim() ?? '';
+                              if (name.isEmpty) return 'Enter your university.';
+                              if (name.length > 160) {
+                                return 'Keep the name under 160 characters.';
+                              }
+                              return null;
+                            },
+                            onChanged: (_) => _formKey.currentState?.validate(),
+                            decoration: const InputDecoration(
+                              labelText: 'University name',
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        _sectionTitle(Icons.waving_hand_outlined,
+                            'Roommate introduction'),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _bio,
+                          enabled: _loadError == null && !_saving,
+                          textCapitalization: TextCapitalization.sentences,
+                          keyboardType: TextInputType.multiline,
+                          maxLines: 4,
+                          maxLength: 1000,
+                          decoration: const InputDecoration(
+                            hintText:
+                                'Share a little about your routines, interests, or what you’re looking for in a roommate.',
+                            alignLabelWithHint: true,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _sectionTitle(
+                            Icons.payments_outlined, 'Monthly budget (GHS)'),
+                        const SizedBox(height: 8),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: TextFormField(
+                                controller: _minimumBudget,
+                                enabled: _loadError == null && !_saving,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                        decimal: true),
+                                inputFormatters: [_budgetInputFormatter()],
+                                validator: _validateMinimum,
+                                onChanged: (_) =>
+                                    _formKey.currentState?.validate(),
+                                decoration: const InputDecoration(
+                                  labelText: 'Minimum',
+                                  prefixText: 'GHS ',
+                                  hintText: '800',
+                                ),
+                              ),
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 20),
+                              child: Text('to',
+                                  style: TextStyle(color: Colors.black54)),
+                            ),
+                            Expanded(
+                              child: TextFormField(
+                                controller: _maximumBudget,
+                                enabled: _loadError == null && !_saving,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                        decimal: true),
+                                inputFormatters: [_budgetInputFormatter()],
+                                validator: _validateMaximum,
+                                onChanged: (_) =>
+                                    _formKey.currentState?.validate(),
+                                decoration: const InputDecoration(
+                                  labelText: 'Maximum',
+                                  prefixText: 'GHS ',
+                                  hintText: '2500',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.only(top: 5),
+                          child: Text(
+                            'Leave both blank if you do not have a set range.',
+                            style:
+                                TextStyle(fontSize: 12, color: Colors.black54),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        _sectionTitle(Icons.cleaning_services_outlined,
+                            'Cleanliness preference'),
+                        const SizedBox(height: 5),
+                        Container(
+                          padding: const EdgeInsets.fromLTRB(14, 9, 14, 11),
+                          decoration: BoxDecoration(
+                            color: _sage,
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Column(
+                            children: [
+                              const Row(
+                                children: [
+                                  Text('1 · Relaxed',
+                                      style: TextStyle(
+                                          fontSize: 12, color: Colors.black54)),
+                                  Spacer(),
+                                  Text('5 · Very tidy',
+                                      style: TextStyle(
+                                          fontSize: 12, color: Colors.black54)),
+                                ],
+                              ),
+                              Slider(
+                                value: _cleanlinessScore,
+                                min: 1,
+                                max: 5,
+                                divisions: 4,
+                                label:
+                                    '${_cleanlinessScore.round()} · ${_cleanlinessLabel(_cleanlinessScore.round())}',
+                                activeColor: _forest,
+                                onChanged: _loadError != null || _saving
+                                    ? null
+                                    : (value) => setState(
+                                        () => _cleanlinessScore = value),
+                              ),
+                              Text(
+                                'Your preference: ${_cleanlinessLabel(_cleanlinessScore.round())}',
+                                style: const TextStyle(
+                                    color: _forest,
+                                    fontWeight: FontWeight.w800),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        _sectionTitle(
+                            Icons.nightlight_outlined, 'Sleep schedule'),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          initialValue: _sleepSchedule,
+                          decoration: const InputDecoration(
+                            prefixIcon: Icon(Icons.schedule_rounded),
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                                value: 'Early bird', child: Text('Early bird')),
+                            DropdownMenuItem(
+                                value: 'Night owl', child: Text('Night owl')),
+                            DropdownMenuItem(
+                                value: 'It varies', child: Text('It varies')),
+                          ],
+                          onChanged: _loadError != null || _saving
+                              ? null
+                              : (value) {
+                                  if (value != null) {
+                                    setState(() => _sleepSchedule = value);
+                                  }
+                                },
+                        ),
+                        const SizedBox(height: 22),
+                        AppButton(
+                          label:
+                              _saving ? 'Saving preferences…' : 'Save changes',
+                          icon: Icons.check_rounded,
+                          onPressed: _loadError != null || _saving
+                              ? null
+                              : () => _saveProfile(),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  const Text('Account',
+                      style:
+                          TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 8),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.school_outlined),
+                    title: const Text('Student verification'),
+                    subtitle:
+                        Text(_isVerified ? 'Verified student' : 'Pending'),
+                    trailing: Icon(
+                      _isVerified
+                          ? Icons.verified_rounded
+                          : Icons.chevron_right,
+                      color: _isVerified ? _forest : null,
+                    ),
+                    onTap: () async {
+                      await Navigator.push<void>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const StudentVerificationScreen(),
+                        ),
+                      );
+                      if (mounted) await _loadProfile();
+                    },
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.shield_outlined),
+                    title: const Text('Safety & privacy'),
+                    subtitle: const Text('Stay safe while finding a room'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push<void>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const SafetyScreen(),
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.home_work_outlined),
+                    title: const Text('My listings'),
+                    subtitle: const Text('Review, pause, or reactivate posts'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push<void>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const MyListingsScreen(),
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.logout),
+                    title: const Text('Sign out'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: _signOut,
+                  ),
+                ],
+              ),
+      );
+
+  Widget _profileHeader() {
+    final displayName = _fullName?.trim().isNotEmpty == true
+        ? _fullName!.trim()
+        : 'Your StudentPad profile';
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: _sage,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Column(
+        children: [
+          CircleAvatar(
+            radius: 38,
+            backgroundColor: Colors.white,
+            child: Text(
+              _initials(displayName),
+              style: const TextStyle(
+                  color: _forest, fontSize: 22, fontWeight: FontWeight.w800),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            displayName,
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          if (_university?.isNotEmpty == true) ...[
+            const SizedBox(height: 3),
+            Text(_university!, style: const TextStyle(color: Colors.black54)),
+          ],
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+            decoration: BoxDecoration(
+                color: Colors.white, borderRadius: BorderRadius.circular(20)),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  _isVerified
+                      ? Icons.verified_rounded
+                      : Icons.verified_outlined,
+                  color: _forest,
+                  size: 16,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  _isVerified ? 'Verified student' : 'Verification pending',
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionTitle(IconData icon, String title) => Row(
+        children: [
+          Icon(icon, size: 19, color: _forest),
+          const SizedBox(width: 8),
+          Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+        ],
+      );
+
+  Widget _errorCard(String message) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF2E8),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.info_outline, color: Color(0xFF8A4D18)),
+            const SizedBox(width: 10),
+            Expanded(child: Text(message)),
+            TextButton(onPressed: _loadProfile, child: const Text('Retry')),
+          ],
+        ),
+      );
+}
+
+TextInputFormatter _budgetInputFormatter() =>
+    TextInputFormatter.withFunction((oldValue, newValue) {
+      return RegExp(r'^\d*\.?\d{0,2}$').hasMatch(newValue.text)
+          ? newValue
+          : oldValue;
+    });
+
+String _displayBudget(Object? value) {
+  if (value is! num) return '';
+  return value.toStringAsFixed(value.toDouble() == value.toInt() ? 0 : 2);
+}
+
+String _cleanlinessLabel(int score) => switch (score) {
+      1 => 'Relaxed',
+      2 => 'Somewhat relaxed',
+      3 => 'Balanced',
+      4 => 'Tidy',
+      _ => 'Very tidy',
+    };
+
+String _initials(String name) {
+  final parts =
+      name.trim().split(RegExp(r'\s+')).where((part) => part.isNotEmpty);
+  final result = parts.take(2).map((part) => part[0].toUpperCase()).join();
+  return result.isEmpty ? 'SP' : result;
+}
+
+String _friendlyError(Object error) => error is PostgrestException
+    ? error.message
+    : 'Check your connection and try again.';
