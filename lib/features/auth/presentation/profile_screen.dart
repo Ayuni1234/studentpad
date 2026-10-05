@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/constants/app_constants.dart';
@@ -13,6 +14,7 @@ import 'welcome_screen.dart';
 const _forest = Color(0xFF134E3F);
 const _sage = Color(0xFFE8F0EC);
 const _canvas = Color(0xFFF9FBF9);
+const _profilePhotoBucket = 'profile-photos';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -38,6 +40,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _universityOption = 'Other';
   bool _isVerified = false;
   bool _whatsappUsesPhone = false;
+  bool _changingPhoto = false;
+  String? _avatarPath;
+  String? _avatarUrl;
+  Uint8List? _avatarPreview;
   double _cleanlinessScore = 3;
   String _sleepSchedule = 'Night owl';
 
@@ -78,9 +84,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final profile = await supabase
           .from('profiles')
           .select(
-              'budget_min_ghs, budget_max_ghs, cleanliness_score, sleep_schedule, bio')
+              'budget_min_ghs, budget_max_ghs, cleanliness_score, sleep_schedule, bio, avatar_path')
           .eq('user_id', user.id)
           .maybeSingle();
+      final avatarPath = profile?['avatar_path'] as String?;
+      final avatarUrl = avatarPath == null
+          ? null
+          : await supabase.storage
+              .from(_profilePhotoBucket)
+              .createSignedUrl(avatarPath, 60 * 60);
       final contactRows =
           await supabase.rpc('my_contact_details') as List<dynamic>;
       final contact = contactRows.isEmpty
@@ -113,6 +125,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _phoneNumber.text = contact?['phone_number'] as String? ?? '';
         _whatsappNumber.text = contact?['whatsapp_number'] as String? ?? '';
         _whatsappUsesPhone = contact?['whatsapp_uses_phone'] == true;
+        _avatarPath = avatarPath;
+        _avatarUrl = avatarUrl;
+        _avatarPreview = null;
         _loading = false;
         _loadError = null;
       });
@@ -122,6 +137,91 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _loading = false;
         _loadError = _friendlyError(error);
       });
+    }
+  }
+
+  Future<void> _changeProfilePhoto() async {
+    if (_changingPhoto) return;
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      _showMessage('Sign in before changing your profile photo.');
+      return;
+    }
+
+    final image = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 86,
+      maxWidth: 1200,
+    );
+    if (image == null || !mounted) return;
+
+    final extension = image.name.split('.').last.toLowerCase();
+    const contentTypes = {
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'png': 'image/png',
+      'webp': 'image/webp',
+    };
+    final contentType = contentTypes[extension];
+    if (contentType == null) {
+      _showMessage('Choose a JPG, PNG, or WebP profile photo.');
+      return;
+    }
+
+    setState(() => _changingPhoto = true);
+    String? uploadedPath;
+    try {
+      final bytes = await image.readAsBytes();
+      if (bytes.length > 5 * 1024 * 1024) {
+        _showMessage('Choose an image smaller than 5 MB.');
+        return;
+      }
+      setState(() => _avatarPreview = bytes);
+      uploadedPath =
+          '${user.id}/${DateTime.now().microsecondsSinceEpoch}.$extension';
+      await supabase.storage.from(_profilePhotoBucket).uploadBinary(
+            uploadedPath,
+            bytes,
+            fileOptions: FileOptions(contentType: contentType),
+          );
+      await supabase.from('profiles').upsert(
+        {'user_id': user.id, 'avatar_path': uploadedPath},
+        onConflict: 'user_id',
+      );
+      final signedUrl = await supabase.storage
+          .from(_profilePhotoBucket)
+          .createSignedUrl(uploadedPath, 60 * 60);
+      final previousPath = _avatarPath;
+      if (!mounted) return;
+      setState(() {
+        _avatarPath = uploadedPath;
+        _avatarUrl = signedUrl;
+        _avatarPreview = null;
+      });
+      if (previousPath != null && previousPath != uploadedPath) {
+        try {
+          await supabase.storage
+              .from(_profilePhotoBucket)
+              .remove([previousPath]);
+        } catch (_) {
+          // Keep the newly saved photo even if removing the old file fails.
+        }
+      }
+      _showMessage('Profile photo updated.');
+    } catch (error) {
+      if (uploadedPath != null) {
+        try {
+          await supabase.storage
+              .from(_profilePhotoBucket)
+              .remove([uploadedPath]);
+        } catch (_) {}
+      }
+      if (mounted) {
+        setState(() => _avatarPreview = null);
+        _showMessage('Could not update your photo. ${_friendlyError(error)}');
+      }
+    } finally {
+      if (mounted) setState(() => _changingPhoto = false);
     }
   }
 
@@ -675,16 +775,57 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Column(
         children: [
-          CircleAvatar(
-            radius: 38,
-            backgroundColor: Colors.white,
-            child: Text(
-              _initials(displayName),
-              style: const TextStyle(
-                  color: _forest, fontSize: 22, fontWeight: FontWeight.w800),
-            ),
+          Stack(
+            alignment: Alignment.bottomRight,
+            children: [
+              CircleAvatar(
+                radius: 42,
+                backgroundColor: Colors.white,
+                backgroundImage: _avatarPreview != null
+                    ? MemoryImage(_avatarPreview!)
+                    : (_avatarUrl == null ? null : NetworkImage(_avatarUrl!)),
+                child: _avatarPreview == null && _avatarUrl == null
+                    ? Text(
+                        _initials(displayName),
+                        style: const TextStyle(
+                            color: _forest,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800),
+                      )
+                    : null,
+              ),
+              Material(
+                color: _forest,
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: _changingPhoto ? null : _changeProfilePhoto,
+                  child: Padding(
+                    padding: const EdgeInsets.all(7),
+                    child: _changingPhoto
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.camera_alt_outlined,
+                            size: 16, color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
+          TextButton.icon(
+            onPressed: _changingPhoto ? null : _changeProfilePhoto,
+            icon: const Icon(Icons.photo_camera_outlined, size: 17),
+            label: Text(_changingPhoto ? 'Uploading photo…' : 'Change photo'),
+            style: TextButton.styleFrom(foregroundColor: _forest),
+          ),
+          const SizedBox(height: 2),
           Text(
             displayName,
             style: Theme.of(context)
