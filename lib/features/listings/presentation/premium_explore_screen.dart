@@ -213,9 +213,17 @@ class _PremiumExploreScreenState extends State<PremiumExploreScreen> {
     if (home.isOwnListing) return;
     try {
       if (!await _ensureApprovedForContact()) return;
-      final chatId = await supabase.rpc('start_listing_chat', params: {
+      final response = await supabase.rpc('start_listing_chat', params: {
         'p_listing_id': home.id,
-      }) as String;
+      });
+      final chatId = response is String && response.isNotEmpty
+          ? response
+          : await _findExistingListingChat(home.id);
+      if (chatId == null) {
+        throw StateError(
+          'The server did not return a conversation. Please try again.',
+        );
+      }
       if (!mounted) return;
       await Navigator.push<void>(
         context,
@@ -234,6 +242,31 @@ class _PremiumExploreScreenState extends State<PremiumExploreScreen> {
         SnackBar(content: Text('Could not open chat. $error')),
       );
     }
+  }
+
+  Future<String?> _findExistingListingChat(String listingId) async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return null;
+
+    final listing = await supabase
+        .from('listings')
+        .select('owner_id')
+        .eq('id', listingId)
+        .maybeSingle();
+    final ownerId = listing?['owner_id'];
+    if (ownerId is! String || ownerId.isEmpty || ownerId == userId) {
+      return null;
+    }
+
+    final matches = await supabase
+        .from('chats')
+        .select('id')
+        .or('and(participant_one_id.eq.$userId,participant_two_id.eq.$ownerId),'
+            'and(participant_one_id.eq.$ownerId,participant_two_id.eq.$userId)')
+        .limit(1);
+    if (matches.isEmpty) return null;
+    final chatId = matches.first['id'];
+    return chatId is String && chatId.isNotEmpty ? chatId : null;
   }
 
   Future<void> _openMyListings() async {
