@@ -1,7 +1,7 @@
 class AppConstants {
   const AppConstants._();
 
-  static const appName = 'StudentPad Ghana';
+  static const appName = 'StudentPadGH';
   static const currencyCode = 'GHS';
 
   static const ghanaianUniversities = <String>[

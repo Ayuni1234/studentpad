@@ -19,7 +19,7 @@ class StudentPadApp extends StatelessWidget {
       onSurface: const Color(0xFF1D2923),
     );
     return MaterialApp(
-      title: 'StudentPad Ghana',
+      title: 'StudentPadGH',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
