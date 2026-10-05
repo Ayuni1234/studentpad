@@ -38,6 +38,7 @@ migrate_working_dir/
 /.studentpad_build/
 /.flutter-user/
 /coverage/
+/.netlify/
 
 # Symbolication related
 app.*.symbols
