@@ -1,5 +1,5 @@
 [build]
-  command = "flutter pub get && flutter build web --release --dart-define=STUDENTPAD_PUBLIC_WEB_ORIGIN=$STUDENTPAD_PUBLIC_WEB_ORIGIN"
+  command = "bash ./netlify-build.sh"
   publish = "build/web"
 
 [[edge_functions]]

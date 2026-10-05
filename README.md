@@ -43,10 +43,11 @@ Listing detail pages use clean URLs at `/listing/<listing-id>`. Flutter's web pa
 
 For Netlify hosting:
 
-1. Install Flutter in the Netlify build environment. The checked-in build command runs `flutter pub get` and builds `build/web`.
-2. Set `STUDENTPAD_PUBLIC_WEB_ORIGIN` to the deployed HTTPS origin (for example, `https://studentpad.example`) for the Netlify **Builds** scope and for the Flutter build. This keeps copied links canonical. Local runs use the current browser origin.
-3. Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` in Netlify with the **Functions** scope so the edge function can read publicly visible listings through the Data API. These are public-client values; never set a service-role key here.
-4. Deploy the site with the Netlify domain or a custom domain. The `listing-photos` bucket is public so the social crawler can load the primary listing image. Keep student-ID files in the separate private verification bucket.
+1. Connect the GitHub repository `Ayuni1234/studentpad` to a Netlify site and set `main` as its production branch. Netlify will then build on every push to `main` and create Deploy Previews for pull requests.
+2. The root `netlify.toml` runs `netlify-build.sh`, which downloads and SHA-256 verifies the current official Flutter stable SDK into Netlify's build cache, runs `flutter pub get`, and builds the release web app to `build/web`.
+3. Set `STUDENTPAD_PUBLIC_WEB_ORIGIN` to the deployed HTTPS origin (for example, `https://studentpad.example`) in Netlify's **Builds** scope. This keeps copied links canonical. Local runs use the current browser origin.
+4. Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` in Netlify with the **Edge Functions** scope so the edge function can read publicly visible listings through the Data API. These are public-client values; never set a service-role key here.
+5. Deploy the site with the Netlify domain or a custom domain. The `listing-photos` bucket is public so the social crawler can load the primary listing image. Keep student-ID files in the separate private verification bucket.
 
 If using a different host, configure it to serve `build/web/index.html` for `/listing/*` in normal browsers and run an equivalent server-side metadata handler for crawler requests before the Flutter app loads. Flutter's browser-only meta tags cannot produce per-listing previews because social crawlers generally read the initial HTML without running the app's JavaScript.
 
