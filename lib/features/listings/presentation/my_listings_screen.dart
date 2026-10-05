@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/services/supabase_service.dart';
+import '../data/listing_photos.dart';
 import 'edit_listing_screen.dart';
 
 const _myListingsForest = Color(0xFF134E3F);
@@ -47,7 +48,7 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
       final rows = await supabase
           .from('listings')
           .select(
-              'id, title, description, image_path, listing_type, location, monthly_rent_ghs, is_active, created_at')
+              'id, title, description, image_path, images, listing_type, location, monthly_rent_ghs, is_active, created_at')
           .eq('owner_id', userId)
           .order('created_at', ascending: false);
       if (!mounted) return;
@@ -144,10 +145,10 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
       if (deleted == null) {
         throw StateError('This listing could not be found or deleted.');
       }
-      final imagePath = listing['image_path'] as String?;
-      if (imagePath != null && imagePath.isNotEmpty) {
+      final imagePaths = listingPhotoPaths(listing);
+      if (imagePaths.isNotEmpty) {
         try {
-          await supabase.storage.from('listing-photos').remove([imagePath]);
+          await supabase.storage.from(listingPhotoBucket).remove(imagePaths);
         } catch (_) {
           // The listing is deleted; a cleanup failure leaves only a private orphan.
         }

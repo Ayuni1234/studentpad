@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -5,11 +6,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/services/supabase_service.dart';
 import '../../../core/widgets/app_button.dart';
+import '../data/listing_photos.dart';
 
 const _editForest = Color(0xFF134E3F);
 const _editSage = Color(0xFFE8F0EC);
 const _editCanvas = Color(0xFFF9FBF9);
-const _listingPhotoBucket = 'listing-photos';
 const _maxListingPhotoBytes = 5 * 1024 * 1024;
 
 class EditListingScreen extends StatefulWidget {
@@ -28,9 +29,11 @@ class _EditListingScreenState extends State<EditListingScreen> {
   late final TextEditingController _rent;
   late final TextEditingController _description;
   final _imagePicker = ImagePicker();
-  XFile? _selectedImage;
-  Uint8List? _selectedImageBytes;
-  bool _removeExistingImage = false;
+  late List<String> _existingImagePaths;
+  final Set<String> _removedExistingPaths = {};
+  final Map<String, String> _existingImageUrls = {};
+  final List<XFile> _selectedImages = [];
+  final List<Uint8List> _selectedImageBytes = [];
   bool _pickingImage = false;
   late String _listingType;
   String? _saveStatus;
@@ -47,6 +50,8 @@ class _EditListingScreenState extends State<EditListingScreen> {
     _description =
         TextEditingController(text: row['description'] as String? ?? '');
     _listingType = row['listing_type'] as String? ?? 'has_space';
+    _existingImagePaths = listingPhotoPaths(row);
+    unawaited(_loadExistingImageUrls());
   }
 
   @override
@@ -66,26 +71,13 @@ class _EditListingScreenState extends State<EditListingScreen> {
       return;
     }
     setState(() => _saving = true);
-    String? uploadedPath;
-    var listingUpdated = false;
-    final oldImagePath = widget.listing['image_path'] as String?;
+    final listingId = widget.listing['id'] as String;
+    final pathsToKeep = _existingImagePaths
+        .where((path) => !_removedExistingPaths.contains(path))
+        .toList(growable: false);
+    final pathsToRemove = _removedExistingPaths.toList(growable: false);
+    final uploadedPaths = <String>[];
     try {
-      final selectedImage = _selectedImage;
-      final imageBytes = _selectedImageBytes;
-      if (selectedImage != null && imageBytes != null) {
-        setState(() => _saveStatus = 'Uploading your new photo…');
-        final extension = _imageExtension(selectedImage.name);
-        uploadedPath =
-            '$userId/${DateTime.now().microsecondsSinceEpoch}.$extension';
-        await supabase.storage.from(_listingPhotoBucket).uploadBinary(
-              uploadedPath,
-              imageBytes,
-              fileOptions: FileOptions(
-                contentType: _imageContentType(selectedImage.name)!,
-                upsert: false,
-              ),
-            );
-      }
       if (mounted) setState(() => _saveStatus = 'Saving your changes…');
       final updates = <String, dynamic>{
         'title': _title.text.trim(),
@@ -93,53 +85,72 @@ class _EditListingScreenState extends State<EditListingScreen> {
         'location': _location.text.trim(),
         'monthly_rent_ghs': double.parse(_rent.text.trim()),
         'description': _description.text.trim(),
+        'images': pathsToKeep,
+        'image_path': pathsToKeep.isEmpty ? null : pathsToKeep.first,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
-      if (uploadedPath != null) {
-        updates['image_path'] = uploadedPath;
-      } else if (_removeExistingImage) {
-        updates['image_path'] = null;
-      }
       final updatedRow = await supabase
           .from('listings')
           .update(updates)
-          .eq('id', widget.listing['id'])
+          .eq('id', listingId)
           .eq('owner_id', userId)
           .select('id')
           .maybeSingle();
       if (updatedRow == null) {
         throw StateError('This listing could not be found or updated.');
       }
-      listingUpdated = true;
-      if (oldImagePath != null &&
-          (uploadedPath != null || _removeExistingImage)) {
-        try {
-          await supabase.storage
-              .from(_listingPhotoBucket)
-              .remove([oldImagePath]);
-        } catch (_) {
-          // The row now points to the new photo or has no photo.
+      _existingImagePaths = pathsToKeep;
+      if (pathsToRemove.isNotEmpty) {
+        await supabase.storage.from(listingPhotoBucket).remove(pathsToRemove);
+        _removedExistingPaths.clear();
+        for (final path in pathsToRemove) {
+          _existingImageUrls.remove(path);
         }
       }
+      for (var index = 0; index < _selectedImages.length; index++) {
+        if (mounted) {
+          setState(() => _saveStatus =
+              'Uploading photo ${index + 1} of ${_selectedImages.length}…');
+        }
+        final image = _selectedImages[index];
+        final path =
+            '$userId/$listingId/${DateTime.now().microsecondsSinceEpoch}_${index + 1}.${_imageExtension(image.name)}';
+        await supabase.storage.from(listingPhotoBucket).uploadBinary(
+              path,
+              _selectedImageBytes[index],
+              fileOptions: FileOptions(
+                contentType: _imageContentType(image.name)!,
+                upsert: false,
+              ),
+            );
+        uploadedPaths.add(path);
+      }
+      if (mounted) setState(() => _saveStatus = 'Saving your photos…');
+      final finalPaths = [...pathsToKeep, ...uploadedPaths];
+      await supabase
+          .from('listings')
+          .update({
+            'images': finalPaths,
+            'image_path': finalPaths.isEmpty ? null : finalPaths.first,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', listingId)
+          .eq('owner_id', userId);
       if (!mounted) return;
       Navigator.pop(context, true);
     } on PostgrestException catch (error) {
-      if (!listingUpdated && uploadedPath != null) {
+      if (uploadedPaths.isNotEmpty) {
         try {
-          await supabase.storage
-              .from(_listingPhotoBucket)
-              .remove([uploadedPath]);
+          await supabase.storage.from(listingPhotoBucket).remove(uploadedPaths);
         } catch (_) {
           // Keep the row update error visible.
         }
       }
       if (mounted) _showMessage('Could not save listing. ${error.message}');
     } catch (_) {
-      if (!listingUpdated && uploadedPath != null) {
+      if (uploadedPaths.isNotEmpty) {
         try {
-          await supabase.storage
-              .from(_listingPhotoBucket)
-              .remove([uploadedPath]);
+          await supabase.storage.from(listingPhotoBucket).remove(uploadedPaths);
         } catch (_) {
           // Keep the row update error visible.
         }
@@ -160,29 +171,45 @@ class _EditListingScreenState extends State<EditListingScreen> {
 
   Future<void> _pickImage() async {
     if (_saving || _pickingImage) return;
+    final retainedCount = _existingImagePaths
+        .where((path) => !_removedExistingPaths.contains(path))
+        .length;
+    final remaining = maxListingPhotos - retainedCount - _selectedImages.length;
+    if (remaining <= 0) {
+      _showMessage(
+          'Remove a photo before adding another. Up to 6 photos are allowed.');
+      return;
+    }
     setState(() => _pickingImage = true);
     try {
-      final image = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
+      final images = await _imagePicker.pickMultiImage(
         imageQuality: 82,
         maxWidth: 2000,
         maxHeight: 2000,
       );
-      if (image == null) return;
-      if (_imageContentType(image.name) == null) {
-        _showMessage('Choose a JPG, PNG, or WebP image.');
-        return;
+      if (images.isEmpty) return;
+      final accepted = <XFile>[];
+      final acceptedBytes = <Uint8List>[];
+      for (final image in images.take(remaining)) {
+        if (_imageContentType(image.name) == null) {
+          _showMessage('Choose JPG, PNG, or WebP images only.');
+          continue;
+        }
+        final bytes = await image.readAsBytes();
+        if (bytes.length > _maxListingPhotoBytes) {
+          _showMessage('Each photo must be smaller than 5 MB.');
+          continue;
+        }
+        accepted.add(image);
+        acceptedBytes.add(bytes);
       }
-      final bytes = await image.readAsBytes();
-      if (bytes.length > _maxListingPhotoBytes) {
-        _showMessage('Choose an image smaller than 5 MB.');
-        return;
+      if (images.length > remaining) {
+        _showMessage('You can add up to 6 photos.');
       }
       if (!mounted) return;
       setState(() {
-        _selectedImage = image;
-        _selectedImageBytes = bytes;
-        _removeExistingImage = false;
+        _selectedImages.addAll(accepted);
+        _selectedImageBytes.addAll(acceptedBytes);
       });
     } catch (_) {
       _showMessage('Could not open the photo library. Please try again.');
@@ -191,11 +218,27 @@ class _EditListingScreenState extends State<EditListingScreen> {
     }
   }
 
-  void _removePhoto() {
+  Future<void> _loadExistingImageUrls() async {
+    for (final path in _existingImagePaths) {
+      try {
+        final url = await supabase.storage
+            .from(listingPhotoBucket)
+            .createSignedUrl(path, 60 * 60);
+        if (mounted) setState(() => _existingImageUrls[path] = url);
+      } catch (_) {
+        // Keep an unavailable photo removable from the listing.
+      }
+    }
+  }
+
+  void _removeExistingPhoto(String path) {
+    setState(() => _removedExistingPaths.add(path));
+  }
+
+  void _removeSelectedPhoto(int index) {
     setState(() {
-      _selectedImage = null;
-      _selectedImageBytes = null;
-      _removeExistingImage = true;
+      _selectedImages.removeAt(index);
+      _selectedImageBytes.removeAt(index);
     });
   }
 
@@ -331,7 +374,7 @@ class _EditListingScreenState extends State<EditListingScreen> {
                 ),
               ),
               const SizedBox(height: 18),
-              const Text('Listing photo (optional)',
+              const Text('Photos (up to 6)',
                   style: TextStyle(fontWeight: FontWeight.w700)),
               const SizedBox(height: 7),
               _photoEditor(),
@@ -373,10 +416,10 @@ class _EditListingScreenState extends State<EditListingScreen> {
       );
 
   Widget _photoEditor() {
-    final bytes = _selectedImageBytes;
-    final hasCurrentPhoto =
-        (widget.listing['image_path'] as String?)?.isNotEmpty == true &&
-            !_removeExistingImage;
+    final retainedPaths = _existingImagePaths
+        .where((path) => !_removedExistingPaths.contains(path))
+        .toList(growable: false);
+    final photoCount = retainedPaths.length + _selectedImages.length;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -384,55 +427,87 @@ class _EditListingScreenState extends State<EditListingScreen> {
         borderRadius: BorderRadius.circular(17),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        if (bytes != null)
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Image.memory(bytes,
-                height: 190, width: double.infinity, fit: BoxFit.cover),
-          )
-        else
-          Row(children: [
-            Icon(
-              hasCurrentPhoto
-                  ? Icons.image_outlined
-                  : Icons.add_photo_alternate_outlined,
-              color: _editForest,
-            ),
-            const SizedBox(width: 9),
-            Expanded(
-              child: Text(
-                hasCurrentPhoto
-                    ? 'A photo is attached. It stays unless you replace or remove it.'
-                    : _removeExistingImage
-                        ? 'The current photo will be removed when you save.'
-                        : 'Choose a JPG, PNG, or WebP photo up to 5 MB.',
-                style: const TextStyle(color: Color(0xFF56645C), height: 1.35),
-              ),
-            ),
-          ]),
-        const SizedBox(height: 8),
-        Wrap(spacing: 8, children: [
+        Row(children: [
+          Expanded(
+            child: Text('$photoCount of $maxListingPhotos photos selected',
+                style: const TextStyle(
+                    color: Color(0xFF56645C), fontWeight: FontWeight.w700)),
+          ),
           OutlinedButton.icon(
-            onPressed: _saving || _pickingImage ? null : _pickImage,
+            onPressed:
+                _saving || _pickingImage || photoCount >= maxListingPhotos
+                    ? null
+                    : _pickImage,
             icon: Icon(_pickingImage
                 ? Icons.hourglass_top_rounded
-                : Icons.photo_library_outlined),
-            label: Text(_pickingImage
-                ? 'Opening photos…'
-                : hasCurrentPhoto || bytes != null
-                    ? 'Replace photo'
-                    : 'Choose photo'),
+                : Icons.add_photo_alternate_outlined),
+            label: Text(_pickingImage ? 'Opening…' : 'Add photos'),
           ),
-          if (hasCurrentPhoto || bytes != null)
-            TextButton.icon(
-              onPressed: _saving ? null : _removePhoto,
-              icon: const Icon(Icons.delete_outline_rounded),
-              label: const Text('Remove'),
-            ),
         ]),
+        if (photoCount > 0) ...[
+          const SizedBox(height: 10),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: photoCount,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            itemBuilder: (context, index) {
+              final existingCount = retainedPaths.length;
+              final isExisting = index < existingCount;
+              final image = isExisting
+                  ? null
+                  : _selectedImageBytes[index - existingCount];
+              final existingPath = isExisting ? retainedPaths[index] : null;
+              final url = existingPath == null
+                  ? null
+                  : _existingImageUrls[existingPath];
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Stack(fit: StackFit.expand, children: [
+                  if (image != null)
+                    Image.memory(image, fit: BoxFit.cover)
+                  else if (url != null)
+                    Image.network(url,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _photoPlaceholder())
+                  else
+                    _photoPlaceholder(),
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: IconButton.filledTonal(
+                      tooltip: 'Remove photo ${index + 1}',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: _saving
+                          ? null
+                          : isExisting
+                              ? () => _removeExistingPhoto(existingPath!)
+                              : () =>
+                                  _removeSelectedPhoto(index - existingCount),
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                    ),
+                  ),
+                ]),
+              );
+            },
+          ),
+        ],
+        const SizedBox(height: 8),
+        const Text('JPG, PNG, or WebP · up to 5 MB each',
+            style: TextStyle(color: Color(0xFF56645C), fontSize: 12)),
       ]),
     );
   }
+
+  Widget _photoPlaceholder() => Container(
+        color: const Color(0xFFDCE9E0),
+        alignment: Alignment.center,
+        child: const Icon(Icons.apartment_rounded, color: Color(0xFF709581)),
+      );
 }
 
 String? _imageContentType(String name) {

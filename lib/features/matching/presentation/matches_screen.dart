@@ -56,12 +56,12 @@ class _MatchesScreenState extends State<MatchesScreen> {
     }
 
     try {
-      final account = await supabase
-          .from('users')
-          .select('is_verified')
-          .eq('user_id', userId)
-          .maybeSingle();
-      final verified = account?['is_verified'] == true;
+      final verificationRows =
+          await supabase.rpc('my_student_verification_state') as List<dynamic>;
+      final verification = verificationRows.isEmpty
+          ? null
+          : Map<String, dynamic>.from(verificationRows.first as Map);
+      final verified = verification?['verification_status'] == 'approved';
       if (!verified) {
         if (!mounted) return;
         setState(() {

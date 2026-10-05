@@ -9,23 +9,30 @@ import 'premium_explore_screen.dart';
 import '../../chat/presentation/chat_screens.dart';
 import '../../matching/presentation/matches_screen.dart';
 import '../../auth/presentation/profile_screen.dart';
+import '../../auth/presentation/welcome_screen.dart';
+import '../data/listing_photos.dart';
 
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key});
+  const HomeShell({super.key, this.isGuest = false});
+  final bool isGuest;
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
 
 class _HomeShellState extends State<HomeShell> {
   int _selected = 0;
-  List<Widget> get _pages => [
-        PremiumExploreScreen(
-          onCreateListing: _openCreateListing,
-        ),
-        const MatchesScreen(),
-        const ChatsScreen(),
-        const ProfileScreen()
-      ];
+  List<Widget> get _pages => widget.isGuest
+      ? [
+          PremiumExploreScreen(
+            onCreateListing: _openCreateListing,
+          ),
+        ]
+      : [
+          PremiumExploreScreen(onCreateListing: _openCreateListing),
+          const MatchesScreen(),
+          const ChatsScreen(),
+          const ProfileScreen(),
+        ];
 
   Future<bool> _openCreateListing() async =>
       await Navigator.push<bool>(
@@ -66,26 +73,46 @@ class _HomeShellState extends State<HomeShell> {
                       ),
                       NavigationBar(
                         selectedIndex: _selected,
-                        onDestinationSelected: (index) =>
-                            setState(() => _selected = index),
-                        destinations: const [
-                          NavigationDestination(
-                              icon: Icon(Icons.search_rounded),
-                              selectedIcon: Icon(Icons.search),
-                              label: 'Explore'),
-                          NavigationDestination(
-                              icon: Icon(Icons.favorite_border_rounded),
-                              selectedIcon: Icon(Icons.favorite),
-                              label: 'Matches'),
-                          NavigationDestination(
-                              icon: Icon(Icons.chat_bubble_outline_rounded),
-                              selectedIcon: Icon(Icons.chat_bubble),
-                              label: 'Inbox'),
-                          NavigationDestination(
-                              icon: Icon(Icons.person_outline_rounded),
-                              selectedIcon: Icon(Icons.person),
-                              label: 'Profile'),
-                        ],
+                        onDestinationSelected: (index) {
+                          if (widget.isGuest) {
+                            Navigator.push<void>(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => const WelcomeScreen(),
+                                ));
+                          } else {
+                            setState(() => _selected = index);
+                          }
+                        },
+                        destinations: widget.isGuest
+                            ? const [
+                                NavigationDestination(
+                                    icon: Icon(Icons.search_rounded),
+                                    selectedIcon: Icon(Icons.search),
+                                    label: 'Explore'),
+                                NavigationDestination(
+                                    icon: Icon(Icons.login_rounded),
+                                    label: 'Sign in'),
+                              ]
+                            : const [
+                                NavigationDestination(
+                                    icon: Icon(Icons.search_rounded),
+                                    selectedIcon: Icon(Icons.search),
+                                    label: 'Explore'),
+                                NavigationDestination(
+                                    icon: Icon(Icons.favorite_border_rounded),
+                                    selectedIcon: Icon(Icons.favorite),
+                                    label: 'Matches'),
+                                NavigationDestination(
+                                    icon:
+                                        Icon(Icons.chat_bubble_outline_rounded),
+                                    selectedIcon: Icon(Icons.chat_bubble),
+                                    label: 'Inbox'),
+                                NavigationDestination(
+                                    icon: Icon(Icons.person_outline_rounded),
+                                    selectedIcon: Icon(Icons.person),
+                                    label: 'Profile'),
+                              ],
                       ),
                     ],
                   ),
@@ -107,7 +134,6 @@ class CreateListingScreen extends StatefulWidget {
 class _CreateListingScreenState extends State<CreateListingScreen> {
   static const _forest = Color(0xFF134E3F);
   static const _sage = Color(0xFFE8F0EC);
-  static const _bucket = 'listing-photos';
   static const _maxImageBytes = 5 * 1024 * 1024;
 
   final _formKey = GlobalKey<FormState>();
@@ -117,8 +143,8 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   final _location = TextEditingController();
   final _description = TextEditingController();
   String _listingType = 'has_space';
-  XFile? _selectedImage;
-  Uint8List? _imageBytes;
+  final List<XFile> _selectedImages = [];
+  final List<Uint8List> _imageBytes = [];
   bool _isPickingImage = false;
   bool _isSubmitting = false;
   String? _submissionStatus;
@@ -134,30 +160,41 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
 
   Future<void> _pickImage() async {
     if (_isPickingImage || _isSubmitting) return;
+    final remaining = maxListingPhotos - _selectedImages.length;
+    if (remaining <= 0) {
+      _showMessage('You can add up to $maxListingPhotos photos.');
+      return;
+    }
     setState(() => _isPickingImage = true);
     try {
-      final image = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
+      final images = await _imagePicker.pickMultiImage(
         imageQuality: 82,
         maxWidth: 2000,
         maxHeight: 2000,
       );
-      if (image == null) return;
-
-      final contentType = _imageContentType(image.name);
-      if (contentType == null) {
-        _showMessage('Choose a JPG, PNG, or WebP image.');
-        return;
+      if (images.isEmpty) return;
+      final accepted = <XFile>[];
+      final acceptedBytes = <Uint8List>[];
+      for (final image in images.take(remaining)) {
+        if (_imageContentType(image.name) == null) {
+          _showMessage('Choose JPG, PNG, or WebP images only.');
+          continue;
+        }
+        final bytes = await image.readAsBytes();
+        if (bytes.length > _maxImageBytes) {
+          _showMessage('Each photo must be smaller than 5 MB.');
+          continue;
+        }
+        accepted.add(image);
+        acceptedBytes.add(bytes);
       }
-      final bytes = await image.readAsBytes();
-      if (bytes.length > _maxImageBytes) {
-        _showMessage('Choose an image smaller than 5 MB.');
-        return;
+      if (images.length > remaining) {
+        _showMessage('You can add up to $maxListingPhotos photos.');
       }
       if (!mounted) return;
       setState(() {
-        _selectedImage = image;
-        _imageBytes = bytes;
+        _selectedImages.addAll(accepted);
+        _imageBytes.addAll(acceptedBytes);
       });
     } catch (_) {
       _showMessage('Could not open the photo library. Please try again.');
@@ -177,41 +214,59 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
 
     setState(() {
       _isSubmitting = true;
-      _submissionStatus = _selectedImage == null
-          ? 'Publishing your listing…'
-          : 'Uploading your photo…';
+      _submissionStatus = 'Publishing your listing…';
     });
-    String? uploadedPath;
+    final uploadedPaths = <String>[];
+    String? listingId;
     try {
-      final selectedImage = _selectedImage;
-      final imageBytes = _imageBytes;
-      if (selectedImage != null && imageBytes != null) {
-        final extension = _imageExtension(selectedImage.name);
-        uploadedPath =
-            '${user.id}/${DateTime.now().microsecondsSinceEpoch}.$extension';
-        await supabase.storage.from(_bucket).uploadBinary(
-              uploadedPath,
-              imageBytes,
+      final rent = double.parse(_rent.text.trim());
+      final listing = await supabase
+          .from('listings')
+          .insert({
+            'owner_id': user.id,
+            'title': _title.text.trim(),
+            'description': _description.text.trim(),
+            'listing_type': _listingType,
+            'location': _location.text.trim(),
+            'monthly_rent_ghs': rent,
+            'image_path': null,
+            'images': <String>[],
+          })
+          .select('id')
+          .single();
+      listingId = listing['id'] as String;
+
+      for (var index = 0; index < _selectedImages.length; index++) {
+        if (mounted) {
+          setState(() => _submissionStatus =
+              'Uploading photo ${index + 1} of ${_selectedImages.length}…');
+        }
+        final image = _selectedImages[index];
+        final path =
+            '${user.id}/$listingId/${DateTime.now().microsecondsSinceEpoch}_${index + 1}.${_imageExtension(image.name)}';
+        await supabase.storage.from(listingPhotoBucket).uploadBinary(
+              path,
+              _imageBytes[index],
               fileOptions: FileOptions(
-                contentType: _imageContentType(selectedImage.name)!,
+                contentType: _imageContentType(image.name)!,
                 upsert: false,
               ),
             );
+        uploadedPaths.add(path);
       }
 
-      if (mounted) {
-        setState(() => _submissionStatus = 'Saving your listing…');
+      if (uploadedPaths.isNotEmpty) {
+        if (mounted) setState(() => _submissionStatus = 'Saving your photos…');
+        await supabase
+            .from('listings')
+            .update({
+              'images': uploadedPaths,
+              'image_path': uploadedPaths.first,
+              'updated_at': DateTime.now().toUtc().toIso8601String(),
+            })
+            .eq('id', listingId)
+            .eq('owner_id', user.id);
       }
-      final rent = double.parse(_rent.text.trim());
-      await supabase.from('listings').insert({
-        'owner_id': user.id,
-        'title': _title.text.trim(),
-        'description': _description.text.trim(),
-        'listing_type': _listingType,
-        'location': _location.text.trim(),
-        'monthly_rent_ghs': rent,
-        'image_path': uploadedPath,
-      });
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -219,11 +274,22 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       );
       Navigator.pop(context, true);
     } catch (error) {
-      if (uploadedPath != null) {
+      if (uploadedPaths.isNotEmpty) {
         try {
-          await supabase.storage.from(_bucket).remove([uploadedPath]);
+          await supabase.storage.from(listingPhotoBucket).remove(uploadedPaths);
         } catch (_) {
           // Keep the original publish error visible if cleanup also fails.
+        }
+      }
+      if (listingId != null) {
+        try {
+          await supabase
+              .from('listings')
+              .delete()
+              .eq('id', listingId)
+              .eq('owner_id', user.id);
+        } catch (_) {
+          // Keep the original publish error visible if row cleanup also fails.
         }
       }
       if (mounted) {
@@ -396,7 +462,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                _fieldLabel('Listing photo (optional)'),
+                _fieldLabel('Photos (up to 6, optional)'),
                 const SizedBox(height: 7),
                 _imagePickerCard(),
                 const SizedBox(height: 24),
@@ -431,76 +497,64 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
         ),
       );
 
-  Widget _imagePickerCard() => Material(
-        color: _sage,
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
+  Widget _imagePickerCard() => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _sage,
           borderRadius: BorderRadius.circular(18),
-          onTap: _isSubmitting || _isPickingImage ? null : _pickImage,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 148),
-            padding: const EdgeInsets.all(12),
-            child: _imageBytes == null
-                ? Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        _isPickingImage
-                            ? Icons.hourglass_top_rounded
-                            : Icons.add_photo_alternate_outlined,
-                        color: _forest,
-                        size: 28,
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        _isPickingImage
-                            ? 'Opening photos…'
-                            : 'Add a listing photo',
-                        style: const TextStyle(
-                            color: _forest, fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  )
-                : ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Stack(
-                      alignment: Alignment.bottomRight,
-                      children: [
-                        Image.memory(
-                          _imageBytes!,
-                          width: double.infinity,
-                          height: 220,
-                          fit: BoxFit.cover,
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.all(8),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton.filledTonal(
-                                tooltip: 'Choose another photo',
-                                onPressed: _isSubmitting ? null : _pickImage,
-                                icon: const Icon(Icons.edit_outlined),
-                              ),
-                              const SizedBox(width: 4),
-                              IconButton.filledTonal(
-                                tooltip: 'Remove photo',
-                                onPressed: _isSubmitting
-                                    ? null
-                                    : () => setState(() {
-                                          _selectedImage = null;
-                                          _imageBytes = null;
-                                        }),
-                                icon: const Icon(Icons.delete_outline_rounded),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          OutlinedButton.icon(
+            onPressed: _isSubmitting ||
+                    _isPickingImage ||
+                    _selectedImages.length >= maxListingPhotos
+                ? null
+                : _pickImage,
+            icon: Icon(_isPickingImage
+                ? Icons.hourglass_top_rounded
+                : Icons.add_photo_alternate_outlined),
+            label: Text(_isPickingImage
+                ? 'Opening photos…'
+                : 'Choose photos (${_selectedImages.length}/$maxListingPhotos)'),
+          ),
+          if (_selectedImages.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _selectedImages.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemBuilder: (context, index) => ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Stack(fit: StackFit.expand, children: [
+                  Image.memory(_imageBytes[index], fit: BoxFit.cover),
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: IconButton.filledTonal(
+                      tooltip: 'Remove photo ${index + 1}',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: _isSubmitting
+                          ? null
+                          : () => setState(() {
+                                _selectedImages.removeAt(index);
+                                _imageBytes.removeAt(index);
+                              }),
+                      icon: const Icon(Icons.close_rounded, size: 18),
                     ),
                   ),
-          ),
-        ),
+                ]),
+              ),
+            ),
+          ],
+          const SizedBox(height: 5),
+          const Text('JPG, PNG, or WebP · up to 5 MB each',
+              style: TextStyle(color: Colors.black54, fontSize: 12)),
+        ]),
       );
 
   Widget _fieldLabel(String label) => Text(

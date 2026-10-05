@@ -35,6 +35,7 @@ migrate_working_dir/
 /preview_run/
 /preview_run2/
 /preview_run3/
+/.studentpad_build/
 /.flutter-user/
 /coverage/
 

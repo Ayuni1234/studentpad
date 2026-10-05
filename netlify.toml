@@ -1,0 +1,12 @@
+[build]
+  command = "flutter pub get && flutter build web --release --dart-define=STUDENTPAD_PUBLIC_WEB_ORIGIN=$STUDENTPAD_PUBLIC_WEB_ORIGIN"
+  publish = "build/web"
+
+[[edge_functions]]
+  function = "listing_share"
+  path = "/listing/*"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -27,6 +27,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _maximumBudget = TextEditingController();
   final _bio = TextEditingController();
   final _otherUniversity = TextEditingController();
+  final _phoneNumber = TextEditingController();
+  final _whatsappNumber = TextEditingController();
 
   bool _loading = true;
   bool _saving = false;
@@ -35,6 +37,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _university;
   String _universityOption = 'Other';
   bool _isVerified = false;
+  bool _whatsappUsesPhone = false;
   double _cleanlinessScore = 3;
   String _sleepSchedule = 'Night owl';
 
@@ -50,6 +53,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _maximumBudget.dispose();
     _bio.dispose();
     _otherUniversity.dispose();
+    _phoneNumber.dispose();
+    _whatsappNumber.dispose();
     super.dispose();
   }
 
@@ -76,6 +81,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               'budget_min_ghs, budget_max_ghs, cleanliness_score, sleep_schedule, bio')
           .eq('user_id', user.id)
           .maybeSingle();
+      final contactRows =
+          await supabase.rpc('my_contact_details') as List<dynamic>;
+      final contact = contactRows.isEmpty
+          ? null
+          : Map<String, dynamic>.from(contactRows.first as Map);
 
       if (!mounted) return;
       final university = account?['university'] as String?;
@@ -100,6 +110,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const ['Early bird', 'Night owl', 'It varies'].contains(sleep)
                 ? sleep!
                 : 'Night owl';
+        _phoneNumber.text = contact?['phone_number'] as String? ?? '';
+        _whatsappNumber.text = contact?['whatsapp_number'] as String? ?? '';
+        _whatsappUsesPhone = contact?['whatsapp_uses_phone'] == true;
         _loading = false;
         _loadError = null;
       });
@@ -131,6 +144,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     setState(() => _saving = true);
     try {
+      final contactFields = <String, dynamic>{
+        'phone_number': _normalizeContactNumber(_phoneNumber.text),
+        'whatsapp_number': _whatsappUsesPhone
+            ? null
+            : _normalizeContactNumber(_whatsappNumber.text),
+        'whatsapp_uses_phone': _whatsappUsesPhone,
+      };
       // profiles.user_id references public.users, which may not exist for a
       // newly registered Auth user yet.
       final account = await supabase
@@ -145,6 +165,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             'user_id': user.id,
             'full_name': metadataName,
             'university': university,
+            ...contactFields,
           });
         } on PostgrestException catch (error) {
           // If another request created the account row at the same time,
@@ -152,12 +173,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           if (error.code != '23505') rethrow;
           await supabase
               .from('users')
-              .update({'university': university}).eq('user_id', user.id);
+              .update({'university': university, ...contactFields}).eq(
+                  'user_id', user.id);
         }
       } else {
         await supabase
             .from('users')
-            .update({'university': university}).eq('user_id', user.id);
+            .update({'university': university, ...contactFields}).eq(
+                'user_id', user.id);
       }
 
       final minValue = _minimumBudget.text.trim().isEmpty
@@ -231,6 +254,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return 'Maximum must be above the minimum.';
     }
     return null;
+  }
+
+  String? _validatePhoneNumber(String? value) {
+    if (_whatsappUsesPhone && (value?.trim().isEmpty ?? true)) {
+      return 'Add a phone number to use it for WhatsApp.';
+    }
+    return _validateContactNumber(value);
+  }
+
+  String? _validateContactNumber(String? value) {
+    if (value?.trim().isEmpty ?? true) return null;
+    return _normalizeContactNumber(value) == null
+        ? 'Enter a Ghanaian number or an international number with country code.'
+        : null;
   }
 
   void _showMessage(String message) {
@@ -365,6 +402,62 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             alignLabelWithHint: true,
                           ),
                         ),
+                        const SizedBox(height: 20),
+                        _sectionTitle(Icons.contact_phone_outlined,
+                            'Contact details for listings'),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Your contact details are shared only with approved students viewing one of your active listings.',
+                          style: TextStyle(
+                              color: Colors.black54, height: 1.4, fontSize: 12),
+                        ),
+                        const SizedBox(height: 10),
+                        TextFormField(
+                          controller: _phoneNumber,
+                          enabled: _loadError == null && !_saving,
+                          keyboardType: TextInputType.phone,
+                          textInputAction: TextInputAction.next,
+                          validator: _validatePhoneNumber,
+                          decoration: const InputDecoration(
+                            labelText: 'Phone number',
+                            hintText: '024 000 0000 or +233 24 000 0000',
+                            prefixIcon: Icon(Icons.call_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: const Text('Use this number for WhatsApp'),
+                          value: _whatsappUsesPhone,
+                          onChanged: _loadError != null || _saving
+                              ? null
+                              : (value) {
+                                  if (value == true &&
+                                      _phoneNumber.text.trim().isEmpty) {
+                                    _showMessage(
+                                        'Add your phone number first.');
+                                    return;
+                                  }
+                                  setState(() =>
+                                      _whatsappUsesPhone = value ?? false);
+                                },
+                        ),
+                        if (!_whatsappUsesPhone) ...[
+                          const SizedBox(height: 4),
+                          TextFormField(
+                            controller: _whatsappNumber,
+                            enabled: _loadError == null && !_saving,
+                            keyboardType: TextInputType.phone,
+                            validator: _validateContactNumber,
+                            decoration: const InputDecoration(
+                              labelText: 'WhatsApp number',
+                              hintText: '024 000 0000 or +233 24 000 0000',
+                              prefixIcon: Icon(Icons.chat_outlined),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 18),
                         const SizedBox(height: 12),
                         _sectionTitle(
                             Icons.payments_outlined, 'Monthly budget (GHS)'),
@@ -663,6 +756,18 @@ TextInputFormatter _budgetInputFormatter() =>
           ? newValue
           : oldValue;
     });
+
+String? _normalizeContactNumber(String? value) {
+  final raw = value?.trim() ?? '';
+  if (raw.isEmpty) return null;
+  final cleaned = raw.replaceAll(RegExp(r'[\s().-]'), '');
+  if (RegExp(r'^0\d{9}$').hasMatch(cleaned)) {
+    return '+233${cleaned.substring(1)}';
+  }
+  if (RegExp(r'^233\d{9}$').hasMatch(cleaned)) return '+$cleaned';
+  if (RegExp(r'^\+[1-9]\d{7,14}$').hasMatch(cleaned)) return cleaned;
+  return null;
+}
 
 String _displayBudget(Object? value) {
   if (value is! num) return '';

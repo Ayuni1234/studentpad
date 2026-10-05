@@ -73,12 +73,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
     }
 
     try {
-      final account = await supabase
-          .from('users')
-          .select('is_verified')
-          .eq('user_id', userId)
-          .maybeSingle();
-      if (account?['is_verified'] != true) {
+      final verificationRows =
+          await supabase.rpc('my_student_verification_state') as List<dynamic>;
+      final verification = verificationRows.isEmpty
+          ? null
+          : Map<String, dynamic>.from(verificationRows.first as Map);
+      if (verification?['verification_status'] != 'approved') {
         if (!mounted || generation != _loadGeneration) return;
         setState(() {
           _threads = const [];
