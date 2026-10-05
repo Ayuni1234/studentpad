@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/widgets/app_button.dart';
 import '../data/listing_photos.dart';
+import '../data/current_location.dart';
 
 const _editForest = Color(0xFF134E3F);
 const _editSage = Color(0xFFE8F0EC);
@@ -38,6 +39,7 @@ class _EditListingScreenState extends State<EditListingScreen> {
   late String _listingType;
   String? _saveStatus;
   bool _saving = false;
+  bool _gettingLocation = false;
 
   @override
   void initState() {
@@ -166,6 +168,26 @@ class _EditListingScreenState extends State<EditListingScreen> {
           _saveStatus = null;
         });
       }
+    }
+  }
+
+  Future<void> _useCurrentLocation() async {
+    if (_gettingLocation || _saving) return;
+    setState(() => _gettingLocation = true);
+    try {
+      final location = await getApproximateCurrentLocation();
+      if (!mounted) return;
+      _location.value = TextEditingValue(
+        text: location,
+        selection: TextSelection.collapsed(offset: location.length),
+      );
+      _formKey.currentState?.validate();
+      _showMessage(
+          'Approximate location added. You can edit it to a neighborhood.');
+    } catch (error) {
+      _showMessage(error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _gettingLocation = false);
     }
   }
 
@@ -350,6 +372,29 @@ class _EditListingScreenState extends State<EditListingScreen> {
                   hintText: 'Legon, Accra',
                   prefixIcon: Icon(Icons.location_on_outlined),
                 ),
+              ),
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed:
+                      _saving || _gettingLocation ? null : _useCurrentLocation,
+                  icon: _gettingLocation
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.my_location_rounded),
+                  label: Text(_gettingLocation
+                      ? 'Getting location…'
+                      : 'Use my current location'),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: Text(
+                    'Adds an approximate GPS area to this editable field. Your location is requested only when tapped.',
+                    style: TextStyle(color: Colors.black54, fontSize: 12)),
               ),
               const SizedBox(height: 10),
               const Text('Monthly rent or budget',

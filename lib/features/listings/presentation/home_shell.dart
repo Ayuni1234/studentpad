@@ -11,7 +11,9 @@ import '../../matching/presentation/matches_screen.dart';
 import '../../auth/presentation/profile_screen.dart';
 import '../../auth/presentation/welcome_screen.dart';
 import '../../auth/presentation/admin_dashboard_screen.dart';
+import '../../notifications/presentation/notifications_screen.dart';
 import '../data/listing_photos.dart';
+import '../data/current_location.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, this.isGuest = false});
@@ -24,6 +26,8 @@ class _HomeShellState extends State<HomeShell> {
   int _selected = 0;
   bool _isAdmin = false;
   String? _checkedAdminUserId;
+  String? _notificationUserId;
+  Stream<List<Map<String, dynamic>>>? _notificationStream;
 
   List<Widget> get _pages => widget.isGuest
       ? [PremiumExploreScreen(onCreateListing: _openCreateListing)]
@@ -31,6 +35,7 @@ class _HomeShellState extends State<HomeShell> {
           PremiumExploreScreen(onCreateListing: _openCreateListing),
           const MatchesScreen(),
           const ChatsScreen(),
+          NotificationsScreen(key: ValueKey(supabase.auth.currentUser?.id)),
           const ProfileScreen(),
           if (_isAdmin) const AdminDashboardScreen(),
         ];
@@ -38,6 +43,8 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void initState() {
     super.initState();
+    _prepareNotificationStream(
+        widget.isGuest ? null : supabase.auth.currentUser?.id);
     _refreshAdminAccess();
   }
 
@@ -47,8 +54,19 @@ class _HomeShellState extends State<HomeShell> {
     final currentUserId = widget.isGuest ? null : supabase.auth.currentUser?.id;
     if (oldWidget.isGuest != widget.isGuest ||
         currentUserId != _checkedAdminUserId) {
+      _prepareNotificationStream(currentUserId);
       _refreshAdminAccess();
     }
+  }
+
+  void _prepareNotificationStream(String? userId) {
+    if (_notificationUserId == userId) return;
+    _notificationUserId = userId;
+    _notificationStream = userId == null
+        ? null
+        : supabase
+            .from('notifications')
+            .stream(primaryKey: const ['id']).eq('user_id', userId);
   }
 
   Future<void> _refreshAdminAccess() async {
@@ -65,7 +83,7 @@ class _HomeShellState extends State<HomeShell> {
     }
     setState(() {
       _isAdmin = false;
-      _selected = _selected > 3 ? 0 : _selected;
+      _selected = _selected > 4 ? 0 : _selected;
     });
     try {
       final allowed = await supabase.rpc('is_studentpad_admin') as bool;
@@ -156,6 +174,12 @@ class _HomeShellState extends State<HomeShell> {
                                     selectedIcon: Icon(Icons.chat_bubble),
                                     label: 'Inbox'),
                                 NavigationDestination(
+                                    icon: _notificationIcon(
+                                        Icons.notifications_none_rounded),
+                                    selectedIcon: _notificationIcon(
+                                        Icons.notifications_rounded),
+                                    label: 'Updates'),
+                                NavigationDestination(
                                     icon: Icon(Icons.person_outline_rounded),
                                     selectedIcon: Icon(Icons.person),
                                     label: 'Profile'),
@@ -177,6 +201,23 @@ class _HomeShellState extends State<HomeShell> {
           },
         ),
       );
+
+  Widget _notificationIcon(IconData icon) {
+    final stream = _notificationStream;
+    if (stream == null) return Icon(icon);
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final unread =
+            snapshot.data?.where((row) => row['read_at'] == null).length ?? 0;
+        return Badge(
+          isLabelVisible: unread > 0,
+          label: Text(unread > 99 ? '99+' : '$unread'),
+          child: Icon(icon),
+        );
+      },
+    );
+  }
 }
 
 class CreateListingScreen extends StatefulWidget {
@@ -201,6 +242,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   final List<XFile> _selectedImages = [];
   final List<Uint8List> _imageBytes = [];
   bool _isPickingImage = false;
+  bool _gettingLocation = false;
   bool _isSubmitting = false;
   String? _submissionStatus;
 
@@ -255,6 +297,26 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       _showMessage('Could not open the photo library. Please try again.');
     } finally {
       if (mounted) setState(() => _isPickingImage = false);
+    }
+  }
+
+  Future<void> _useCurrentLocation() async {
+    if (_gettingLocation || _isSubmitting) return;
+    setState(() => _gettingLocation = true);
+    try {
+      final location = await getApproximateCurrentLocation();
+      if (!mounted) return;
+      _location.value = TextEditingValue(
+        text: location,
+        selection: TextSelection.collapsed(offset: location.length),
+      );
+      _formKey.currentState?.validate();
+      _showMessage(
+          'Approximate location added. You can edit it to a neighborhood.');
+    } catch (error) {
+      _showMessage(error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _gettingLocation = false);
     }
   }
 
@@ -477,6 +539,30 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                     prefixIcon: Icon(Icons.location_on_outlined),
                     counterText: '',
                   ),
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: _isSubmitting || _gettingLocation
+                        ? null
+                        : _useCurrentLocation,
+                    icon: _gettingLocation
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.my_location_rounded),
+                    label: Text(_gettingLocation
+                        ? 'Getting location…'
+                        : 'Use my current location'),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.only(top: 2),
+                  child: Text(
+                      'Adds an approximate GPS area to this editable field. Your location is requested only when tapped.',
+                      style: TextStyle(color: Colors.black54, fontSize: 12)),
                 ),
                 const SizedBox(height: 14),
                 _fieldLabel('Monthly rent'),

@@ -41,6 +41,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isVerified = false;
   bool _whatsappUsesPhone = false;
   bool _changingPhoto = false;
+  bool _deletingAccount = false;
   String? _avatarPath;
   String? _avatarUrl;
   Uint8List? _avatarPreview;
@@ -388,6 +389,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     } on AuthException catch (error) {
       if (mounted) _showMessage(error.message);
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    if (_deletingAccount) return;
+    final confirmation = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete your account?'),
+        content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                  'This permanently removes your profile, listings, chats, and uploaded photos. This cannot be undone.'),
+              const SizedBox(height: 14),
+              TextField(
+                  controller: confirmation,
+                  decoration: const InputDecoration(
+                      labelText: 'Type DELETE to confirm')),
+            ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style:
+                  FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+              onPressed: () => Navigator.pop(
+                  dialogContext, confirmation.text.trim() == 'DELETE'),
+              child: const Text('Delete account')),
+        ],
+      ),
+    );
+    confirmation.dispose();
+    if (confirmed != true || !mounted) return;
+    setState(() => _deletingAccount = true);
+    try {
+      final result = await supabase.functions.invoke('delete-account');
+      if (result.status < 200 ||
+          result.status >= 300 ||
+          (result.data is Map && result.data['deleted'] != true)) {
+        throw StateError('Account deletion was not confirmed.');
+      }
+      await supabase.auth.signOut(scope: SignOutScope.local);
+      if (!mounted) return;
+      Navigator.pushAndRemoveUntil<void>(
+          context,
+          MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+          (_) => false);
+    } catch (_) {
+      if (mounted) {
+        _showMessage('Could not delete your account. Please try again.');
+      }
+    } finally {
+      if (mounted) setState(() => _deletingAccount = false);
     }
   }
 
@@ -758,6 +816,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     title: const Text('Sign out'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: _signOut,
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.delete_forever_outlined,
+                        color: Colors.red.shade700),
+                    title: Text('Delete account',
+                        style: TextStyle(color: Colors.red.shade700)),
+                    subtitle:
+                        const Text('Permanently remove your account and data'),
+                    trailing: _deletingAccount
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.chevron_right),
+                    onTap: _deletingAccount ? null : _deleteAccount,
                   ),
                 ],
               ),
