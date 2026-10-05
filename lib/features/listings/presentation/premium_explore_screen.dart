@@ -14,6 +14,7 @@ import '../../chat/presentation/chat_screens.dart';
 import '../data/listing_photos.dart';
 import '../data/listing_share.dart';
 import 'listing_photo_carousel.dart';
+import 'my_listings_screen.dart';
 
 const _forest = Color(0xFF134E3F);
 
@@ -77,6 +78,25 @@ class _PremiumExploreScreenState extends State<PremiumExploreScreen> {
           .order('created_at', ascending: false)
           .limit(50);
 
+      final myListingIds = <String>{};
+      final userId = supabase.auth.currentUser?.id;
+      if (userId != null) {
+        // Ask only for this user's own listing IDs. Do not expose owner IDs in
+        // the public feed query, which is also used by signed-out visitors.
+        try {
+          final ownRows = await supabase
+              .from('listings')
+              .select('id')
+              .eq('owner_id', userId);
+          myListingIds.addAll(
+            List<Map<String, dynamic>>.from(ownRows)
+                .map((row) => row['id'] as String),
+          );
+        } catch (_) {
+          // Keep public browsing available if the optional owner lookup fails.
+        }
+      }
+
       final homes = List<Map<String, dynamic>>.from(rows).map((row) {
         final imagePaths = listingPhotoPaths(row);
         final imageUrl = imagePaths.isEmpty
@@ -84,7 +104,12 @@ class _PremiumExploreScreenState extends State<PremiumExploreScreen> {
             : supabase.storage
                 .from(listingPhotoBucket)
                 .getPublicUrl(imagePaths.first);
-        return _HomeListing.fromRow(row, imagePaths, imageUrl);
+        return _HomeListing.fromRow(
+          row,
+          imagePaths,
+          imageUrl,
+          isOwnListing: myListingIds.contains(row['id']),
+        );
       }).toList(growable: false);
       if (!mounted) return;
       setState(() {
@@ -121,6 +146,7 @@ class _PremiumExploreScreenState extends State<PremiumExploreScreen> {
           home: home,
           onMessage: () => _startChat(home),
           ensureApproved: _ensureApprovedForContact,
+          onManageListing: _openMyListings,
         ),
       ),
     );
@@ -154,6 +180,15 @@ class _PremiumExploreScreenState extends State<PremiumExploreScreen> {
         return;
       }
       final imagePaths = listingPhotoPaths(row);
+      final userId = supabase.auth.currentUser?.id;
+      final isOwnListing = userId != null &&
+          (await supabase
+                  .from('listings')
+                  .select('id')
+                  .eq('id', listingId)
+                  .eq('owner_id', userId)
+                  .maybeSingle()) !=
+              null;
       final home = _HomeListing.fromRow(
         row,
         imagePaths,
@@ -162,6 +197,7 @@ class _PremiumExploreScreenState extends State<PremiumExploreScreen> {
             : supabase.storage
                 .from(listingPhotoBucket)
                 .getPublicUrl(imagePaths.first),
+        isOwnListing: isOwnListing,
       );
       _showHomeDetails(home);
     } catch (_) {
@@ -174,6 +210,7 @@ class _PremiumExploreScreenState extends State<PremiumExploreScreen> {
   }
 
   Future<void> _startChat(_HomeListing home) async {
+    if (home.isOwnListing) return;
     try {
       if (!await _ensureApprovedForContact()) return;
       final chatId = await supabase.rpc('start_listing_chat', params: {
@@ -197,6 +234,14 @@ class _PremiumExploreScreenState extends State<PremiumExploreScreen> {
         SnackBar(content: Text('Could not open chat. $error')),
       );
     }
+  }
+
+  Future<void> _openMyListings() async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const MyListingsScreen()),
+    );
+    if (mounted) await _loadListings();
   }
 
   Future<bool> _ensureApprovedForContact() async {
@@ -539,20 +584,23 @@ class _HomeListing {
     required this.monthlyRent,
     required this.listingType,
     required this.imagePaths,
+    this.isOwnListing = false,
     this.imageUrl,
   });
 
   final String id, title, description, area, listingType;
   final num monthlyRent;
   final List<String> imagePaths;
+  final bool isOwnListing;
   final String? imageUrl;
 
   String get rent => '${_formatGhs(monthlyRent)} / month';
   String get listingLabel =>
       listingType == 'has_space' ? 'Room available' : 'Looking for a room';
 
-  factory _HomeListing.fromRow(Map<String, dynamic> row,
-          List<String> imagePaths, String? imageUrl) =>
+  factory _HomeListing.fromRow(
+          Map<String, dynamic> row, List<String> imagePaths, String? imageUrl,
+          {bool isOwnListing = false}) =>
       _HomeListing(
         id: row['id'] as String,
         title: row['title'] as String,
@@ -561,6 +609,7 @@ class _HomeListing {
         monthlyRent: row['monthly_rent_ghs'] as num,
         listingType: row['listing_type'] as String,
         imagePaths: imagePaths,
+        isOwnListing: isOwnListing,
         imageUrl: imageUrl,
       );
 }
@@ -770,10 +819,12 @@ class _HomeDetailScreen extends StatefulWidget {
     required this.home,
     required this.onMessage,
     required this.ensureApproved,
+    required this.onManageListing,
   });
   final _HomeListing home;
   final Future<void> Function() onMessage;
   final Future<bool> Function() ensureApproved;
+  final Future<void> Function() onManageListing;
 
   @override
   State<_HomeDetailScreen> createState() => _HomeDetailScreenState();
@@ -908,6 +959,7 @@ class _HomeDetailScreenState extends State<_HomeDetailScreen> {
   }
 
   Future<void> _openListingContact({required bool whatsapp}) async {
+    if (widget.home.isOwnListing) return;
     if (!await widget.ensureApproved()) return;
     try {
       // Recheck approval, listing activity, and blocks at the moment the
@@ -1041,16 +1093,51 @@ class _HomeDetailScreenState extends State<_HomeDetailScreen> {
                         backgroundColor: Color(0xFFE8F0EC),
                         child: Icon(Icons.school_outlined,
                             color: Color(0xFF134E3F))),
-                    title: const Text('StudentPad student',
+                    title: Text(
+                        widget.home.isOwnListing ? 'You' : 'StudentPad student',
                         style: TextStyle(fontWeight: FontWeight.w800)),
-                    subtitle: const Text('Listing owner'),
+                    subtitle: Text(widget.home.isOwnListing
+                        ? 'Your listing'
+                        : 'Listing owner'),
                   ),
-                  _contactSection(),
-                  const SizedBox(height: 8),
-                  AppButton(
-                      label: 'Message listing owner',
-                      icon: Icons.chat_bubble_outline,
-                      onPressed: () => widget.onMessage()),
+                  if (widget.home.isOwnListing) ...[
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE8F0EC),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('This is your listing.',
+                              style: TextStyle(fontWeight: FontWeight.w800)),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Other approved students can call, message, or WhatsApp you from this page.',
+                            style: TextStyle(color: Colors.black54),
+                          ),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: widget.onManageListing,
+                            icon: const Icon(Icons.edit_outlined),
+                            label: const Text('Manage listing'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: _forest,
+                              side: const BorderSide(color: _forest),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else ...[
+                    _contactSection(),
+                    const SizedBox(height: 8),
+                    AppButton(
+                        label: 'Message listing owner',
+                        icon: Icons.chat_bubble_outline,
+                        onPressed: () => widget.onMessage()),
+                  ],
                 ]),
           ),
         ),
