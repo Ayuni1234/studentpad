@@ -5,7 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/services/supabase_service.dart';
 import '../../../core/widgets/app_button.dart';
-import 'verification_review_screen.dart';
+import 'admin_dashboard_screen.dart';
 
 const _forest = Color(0xFF134E3F);
 const _sage = Color(0xFFE8F0EC);
@@ -29,7 +29,7 @@ class _StudentVerificationScreenState extends State<StudentVerificationScreen> {
   Uint8List? _imageBytes;
   String? _storedImagePath;
   bool _verified = false;
-  bool _isReviewer = false;
+  bool _isAdmin = false;
   String _verificationStatus = 'not_submitted';
   bool _loading = true;
   String? _loadError;
@@ -59,15 +59,14 @@ class _StudentVerificationScreenState extends State<StudentVerificationScreen> {
           await supabase.rpc('my_student_verification_state') as List<dynamic>;
       final row =
           rows.isEmpty ? null : Map<String, dynamic>.from(rows.first as Map);
-      final isReviewer =
-          await supabase.rpc('is_studentpad_verification_reviewer') as bool;
+      final isAdmin = await supabase.rpc('is_studentpad_admin') as bool;
       if (!mounted) return;
       setState(() {
         _storedImagePath = row?['student_id_path'] as String?;
         _verified = row?['is_verified'] == true;
         _verificationStatus =
             row?['verification_status'] as String? ?? 'not_submitted';
-        _isReviewer = isReviewer;
+        _isAdmin = isAdmin;
         _loading = false;
         _loadError = null;
       });
@@ -218,16 +217,16 @@ class _StudentVerificationScreenState extends State<StudentVerificationScreen> {
               style: TextStyle(fontWeight: FontWeight.w800)),
           backgroundColor: _canvas,
           actions: [
-            if (_isReviewer)
+            if (_isAdmin)
               IconButton(
-                tooltip: 'Review student IDs',
+                tooltip: 'Admin dashboard',
                 onPressed: _busy
                     ? null
                     : () async {
                         await Navigator.push<void>(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => const VerificationReviewScreen(),
+                            builder: (_) => const AdminDashboardScreen(),
                           ),
                         );
                         if (mounted) await _loadStatus();

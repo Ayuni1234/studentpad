@@ -10,6 +10,7 @@ import '../../chat/presentation/chat_screens.dart';
 import '../../matching/presentation/matches_screen.dart';
 import '../../auth/presentation/profile_screen.dart';
 import '../../auth/presentation/welcome_screen.dart';
+import '../../auth/presentation/admin_dashboard_screen.dart';
 import '../data/listing_photos.dart';
 
 class HomeShell extends StatefulWidget {
@@ -21,18 +22,64 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _selected = 0;
+  bool _isAdmin = false;
+  String? _checkedAdminUserId;
+
   List<Widget> get _pages => widget.isGuest
-      ? [
-          PremiumExploreScreen(
-            onCreateListing: _openCreateListing,
-          ),
-        ]
+      ? [PremiumExploreScreen(onCreateListing: _openCreateListing)]
       : [
           PremiumExploreScreen(onCreateListing: _openCreateListing),
           const MatchesScreen(),
           const ChatsScreen(),
           const ProfileScreen(),
+          if (_isAdmin) const AdminDashboardScreen(),
         ];
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshAdminAccess();
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final currentUserId = widget.isGuest ? null : supabase.auth.currentUser?.id;
+    if (oldWidget.isGuest != widget.isGuest ||
+        currentUserId != _checkedAdminUserId) {
+      _refreshAdminAccess();
+    }
+  }
+
+  Future<void> _refreshAdminAccess() async {
+    final userId = widget.isGuest ? null : supabase.auth.currentUser?.id;
+    _checkedAdminUserId = userId;
+    if (userId == null) {
+      if (mounted) {
+        setState(() {
+          _isAdmin = false;
+          _selected = 0;
+        });
+      }
+      return;
+    }
+    setState(() {
+      _isAdmin = false;
+      _selected = _selected > 3 ? 0 : _selected;
+    });
+    try {
+      final allowed = await supabase.rpc('is_studentpad_admin') as bool;
+      if (!mounted || supabase.auth.currentUser?.id != userId) return;
+      setState(() {
+        _isAdmin = allowed;
+      });
+    } catch (_) {
+      if (!mounted || supabase.auth.currentUser?.id != userId) return;
+      setState(() {
+        _isAdmin = false;
+      });
+    }
+  }
 
   Future<bool> _openCreateListing() async =>
       await Navigator.push<bool>(
@@ -94,7 +141,7 @@ class _HomeShellState extends State<HomeShell> {
                                     icon: Icon(Icons.login_rounded),
                                     label: 'Sign in'),
                               ]
-                            : const [
+                            : [
                                 NavigationDestination(
                                     icon: Icon(Icons.search_rounded),
                                     selectedIcon: Icon(Icons.search),
@@ -112,6 +159,14 @@ class _HomeShellState extends State<HomeShell> {
                                     icon: Icon(Icons.person_outline_rounded),
                                     selectedIcon: Icon(Icons.person),
                                     label: 'Profile'),
+                                if (_isAdmin)
+                                  const NavigationDestination(
+                                    icon: Icon(
+                                        Icons.admin_panel_settings_outlined),
+                                    selectedIcon:
+                                        Icon(Icons.admin_panel_settings),
+                                    label: 'Admin',
+                                  ),
                               ],
                       ),
                     ],
