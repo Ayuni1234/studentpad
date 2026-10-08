@@ -7,11 +7,10 @@ import '../../../core/widgets/app_button.dart';
 import '../../../core/services/supabase_service.dart';
 import 'premium_explore_screen.dart';
 import '../../chat/presentation/chat_screens.dart';
-import '../../matching/presentation/matches_screen.dart';
+import '../../matching/presentation/roommate_discovery_screen.dart';
 import '../../auth/presentation/profile_screen.dart';
 import '../../auth/presentation/welcome_screen.dart';
 import '../../auth/presentation/admin_dashboard_screen.dart';
-import '../../notifications/presentation/notifications_screen.dart';
 import '../data/listing_photos.dart';
 import '../data/current_location.dart';
 
@@ -26,16 +25,15 @@ class _HomeShellState extends State<HomeShell> {
   int _selected = 0;
   bool _isAdmin = false;
   String? _checkedAdminUserId;
-  String? _notificationUserId;
-  Stream<List<Map<String, dynamic>>>? _notificationStream;
 
   List<Widget> get _pages => widget.isGuest
       ? [PremiumExploreScreen(onCreateListing: _openCreateListing)]
       : [
           PremiumExploreScreen(onCreateListing: _openCreateListing),
-          const MatchesScreen(),
+          RoommateDiscoveryScreen(
+            onFindRoom: () => setState(() => _selected = 0),
+          ),
           const ChatsScreen(),
-          NotificationsScreen(key: ValueKey(supabase.auth.currentUser?.id)),
           const ProfileScreen(),
           if (_isAdmin) const AdminDashboardScreen(),
         ];
@@ -43,8 +41,6 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void initState() {
     super.initState();
-    _prepareNotificationStream(
-        widget.isGuest ? null : supabase.auth.currentUser?.id);
     _refreshAdminAccess();
   }
 
@@ -54,19 +50,8 @@ class _HomeShellState extends State<HomeShell> {
     final currentUserId = widget.isGuest ? null : supabase.auth.currentUser?.id;
     if (oldWidget.isGuest != widget.isGuest ||
         currentUserId != _checkedAdminUserId) {
-      _prepareNotificationStream(currentUserId);
       _refreshAdminAccess();
     }
-  }
-
-  void _prepareNotificationStream(String? userId) {
-    if (_notificationUserId == userId) return;
-    _notificationUserId = userId;
-    _notificationStream = userId == null
-        ? null
-        : supabase
-            .from('notifications')
-            .stream(primaryKey: const ['id']).eq('user_id', userId);
   }
 
   Future<void> _refreshAdminAccess() async {
@@ -83,7 +68,7 @@ class _HomeShellState extends State<HomeShell> {
     }
     setState(() {
       _isAdmin = false;
-      _selected = _selected > 4 ? 0 : _selected;
+      _selected = _selected > 3 ? 0 : _selected;
     });
     try {
       final allowed = await supabase.rpc('is_studentpad_admin') as bool;
@@ -165,20 +150,14 @@ class _HomeShellState extends State<HomeShell> {
                                     selectedIcon: Icon(Icons.search),
                                     label: 'Explore'),
                                 NavigationDestination(
-                                    icon: Icon(Icons.favorite_border_rounded),
-                                    selectedIcon: Icon(Icons.favorite),
-                                    label: 'Matches'),
+                                    icon: Icon(Icons.people_alt_outlined),
+                                    selectedIcon: Icon(Icons.people_alt),
+                                    label: 'Roommates'),
                                 NavigationDestination(
                                     icon:
                                         Icon(Icons.chat_bubble_outline_rounded),
                                     selectedIcon: Icon(Icons.chat_bubble),
                                     label: 'Inbox'),
-                                NavigationDestination(
-                                    icon: _notificationIcon(
-                                        Icons.notifications_none_rounded),
-                                    selectedIcon: _notificationIcon(
-                                        Icons.notifications_rounded),
-                                    label: 'Updates'),
                                 NavigationDestination(
                                     icon: Icon(Icons.person_outline_rounded),
                                     selectedIcon: Icon(Icons.person),
@@ -201,23 +180,6 @@ class _HomeShellState extends State<HomeShell> {
           },
         ),
       );
-
-  Widget _notificationIcon(IconData icon) {
-    final stream = _notificationStream;
-    if (stream == null) return Icon(icon);
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: stream,
-      builder: (context, snapshot) {
-        final unread =
-            snapshot.data?.where((row) => row['read_at'] == null).length ?? 0;
-        return Badge(
-          isLabelVisible: unread > 0,
-          label: Text(unread > 99 ? '99+' : '$unread'),
-          child: Icon(icon),
-        );
-      },
-    );
-  }
 }
 
 class CreateListingScreen extends StatefulWidget {
