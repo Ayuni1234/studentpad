@@ -32,7 +32,9 @@ class _HomeShellState extends State<HomeShell> {
       : [
           PremiumExploreScreen(onCreateListing: _openCreateListing),
           const MatchesScreen(),
-          const RoommateDiscoveryScreen(),
+          RoommateDiscoveryScreen(
+            onFindRoom: () => setState(() => _selected = 0),
+          ),
           const ChatsScreen(),
           const ProfileScreen(),
           if (_isAdmin) const AdminDashboardScreen(),
@@ -184,7 +186,6 @@ class _HomeShellState extends State<HomeShell> {
           },
         ),
       );
-
 }
 
 class CreateListingScreen extends StatefulWidget {

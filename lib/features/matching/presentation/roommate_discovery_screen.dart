@@ -14,7 +14,9 @@ const _discoverySage = Color(0xFFE8F0EC);
 const _discoveryCanvas = Color(0xFFF9FBF9);
 
 class RoommateDiscoveryScreen extends StatefulWidget {
-  const RoommateDiscoveryScreen({super.key});
+  const RoommateDiscoveryScreen({super.key, this.onFindRoom});
+
+  final VoidCallback? onFindRoom;
 
   @override
   State<RoommateDiscoveryScreen> createState() =>
@@ -118,6 +120,88 @@ class _RoommateDiscoveryScreenState extends State<RoommateDiscoveryScreen> {
       MaterialPageRoute(builder: (_) => const RoommateProfileScreen()),
     );
     if (saved == true) await _load();
+  }
+
+  Future<void> _openActions() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.person_add_alt_1_outlined),
+              title: const Text('Create roommate match'),
+              subtitle: const Text('Add or update your roommate profile'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _editProfile();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.home_work_outlined),
+              title: const Text('Find a room'),
+              subtitle: const Text('Browse available places to rent'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                widget.onFindRoom?.call();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openFilters() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setModalState) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              8,
+              20,
+              MediaQuery.viewInsetsOf(context).bottom + 20,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _filters(setModalState),
+                const SizedBox(height: 14),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _discoveryForest,
+                  ),
+                  onPressed: () {
+                    Navigator.pop(sheetContext);
+                    if (mounted) setState(() {});
+                  },
+                  child: const Text('Show matching roommates'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    setModalState(() {
+                      _locationFilter = null;
+                      _housingFilter = 'Any';
+                      _budgetFilter.clear();
+                    });
+                  },
+                  child: const Text('Clear filters'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (mounted) setState(() {});
   }
 
   Future<void> _connect(RoommateProfile profile) async {
@@ -261,14 +345,14 @@ class _RoommateDiscoveryScreenState extends State<RoommateDiscoveryScreen> {
           ),
           actions: [
             IconButton(
-              tooltip: 'Edit roommate profile',
-              onPressed: _editProfile,
-              icon: const Icon(Icons.edit_outlined, color: _discoveryForest),
+              tooltip: 'Search and filter roommates',
+              onPressed: _verified ? _openFilters : null,
+              icon: const Icon(Icons.search_rounded, color: _discoveryForest),
             ),
             IconButton(
-              tooltip: 'Refresh roommate profiles',
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded, color: _discoveryForest),
+              tooltip: 'Create roommate match or find a room',
+              onPressed: _openActions,
+              icon: const Icon(Icons.add_rounded, color: _discoveryForest),
             ),
           ],
         ),
@@ -288,16 +372,6 @@ class _RoommateDiscoveryScreenState extends State<RoommateDiscoveryScreen> {
                 'Browse verified students looking to team up and share rent.',
                 style: TextStyle(color: Colors.black54, height: 1.4),
               ),
-              const SizedBox(height: 14),
-              OutlinedButton.icon(
-                onPressed: _editProfile,
-                icon: const Icon(Icons.person_outline),
-                label: const Text('Create or edit my roommate profile'),
-              ),
-              if (_verified && !_loading) ...[
-                const SizedBox(height: 12),
-                _filters(),
-              ],
               const SizedBox(height: 12),
               if (_loading)
                 const Padding(
@@ -341,12 +415,7 @@ class _RoommateDiscoveryScreenState extends State<RoommateDiscoveryScreen> {
                   icon: Icons.people_outline_rounded,
                   title: 'No roommate profiles yet',
                   message:
-                      'Create your profile to let other verified students find you. Check back as more students join.',
-                  action: TextButton.icon(
-                    onPressed: _editProfile,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Set up your profile'),
-                  ),
+                      'Roommate profiles from verified students will appear here. Use + to create your profile or browse available rooms.',
                 )
               else if (_filteredProfiles.isEmpty)
                 _notice(
@@ -375,7 +444,7 @@ class _RoommateDiscoveryScreenState extends State<RoommateDiscoveryScreen> {
         ),
       );
 
-  Widget _filters() => Container(
+  Widget _filters(void Function(VoidCallback) setModalState) => Container(
         padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
           color: _discoverySage,
@@ -411,7 +480,8 @@ class _RoommateDiscoveryScreenState extends State<RoommateDiscoveryScreen> {
                   ),
                 ),
               ],
-              onChanged: (value) => setState(() => _locationFilter = value),
+              onChanged: (value) =>
+                  setModalState(() => _locationFilter = value),
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
@@ -430,7 +500,9 @@ class _RoommateDiscoveryScreenState extends State<RoommateDiscoveryScreen> {
                   )
                   .toList(),
               onChanged: (value) {
-                if (value != null) setState(() => _housingFilter = value);
+                if (value != null) {
+                  setModalState(() => _housingFilter = value);
+                }
               },
             ),
             const SizedBox(height: 10),
@@ -445,7 +517,7 @@ class _RoommateDiscoveryScreenState extends State<RoommateDiscoveryScreen> {
                 contentPadding:
                     EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               ),
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) => setModalState(() {}),
             ),
           ],
         ),
