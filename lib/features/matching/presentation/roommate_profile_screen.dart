@@ -47,6 +47,7 @@ class _RoommateProfileScreenState extends State<RoommateProfileScreen> {
   bool _saving = false;
   bool _verified = false;
   bool _pickingAvatar = false;
+  bool _allowDirectContact = false;
   String? _loadError;
   String _gender = 'Prefer not to say';
   String _housingType = 'Off-campus';
@@ -114,6 +115,7 @@ class _RoommateProfileScreenState extends State<RoommateProfileScreen> {
           _gender = row['gender'] as String? ?? _gender;
           _housingType =
               row['housing_type_preference'] as String? ?? _housingType;
+          _allowDirectContact = row['allow_direct_contact'] as bool? ?? false;
           final locations = row['preferred_locations'];
           if (locations is List) {
             _locations.addAll(locations.map((item) => item.toString()));
@@ -213,6 +215,7 @@ class _RoommateProfileScreenState extends State<RoommateProfileScreen> {
         'gender': _gender,
         'housing_type_preference': _housingType,
         'preferred_locations': _locations.toList()..sort(),
+        'allow_direct_contact': _allowDirectContact,
         'budget_min_ghs': double.parse(_budgetMin.text.trim()),
         'budget_max_ghs': double.parse(_budgetMax.text.trim()),
         'avatar_url': _avatarPath,
@@ -422,6 +425,18 @@ class _RoommateProfileScreenState extends State<RoommateProfileScreen> {
                                   setState(() => _housingType = value);
                                 }
                               },
+                            ),
+                            const SizedBox(height: 8),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              value: _allowDirectContact,
+                              onChanged: (value) =>
+                                  setState(() => _allowDirectContact = value),
+                              title: const Text('Share my phone and WhatsApp'),
+                              subtitle: const Text(
+                                'Allow approved students viewing your roommate profile to see your contact details. You can turn this off any time.',
+                              ),
+                              activeThumbColor: _roommateForest,
                             ),
                             const SizedBox(height: 20),
                             const Text(

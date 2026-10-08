@@ -12,6 +12,7 @@ StudentPad helps university students in Ghana find off-campus housing and compat
 - Lifestyle profiles with university, GHS budget range, cleanliness preference, sleep schedule, and an optional roommate introduction.
 - Compatibility-ranked verified students with “Say hello” in-app chat.
 - Dedicated roommate discovery with major, graduation year, housing preferences, target locations, share-budget filters, private profile photos, and verified-student messaging.
+- Optional phone and WhatsApp contact sharing on roommate profiles. Contact details remain private unless a student opts in, and are returned only to approved peers who are not blocked.
 - Profile contact details with listing-scoped Call and WhatsApp actions, available only when both students are approved and neither has blocked the other.
 - Realtime inbox and messages, with database-enforced peer blocking and a private conversation-report workflow.
 - Reviewer screens for pending student IDs and peer reports.
@@ -64,7 +65,7 @@ In Supabase Auth settings:
 
 The schema and security changes are in timestamped SQL files under `supabase/migrations/`. The connected project includes listing-scoped direct contact in `20261004212335_listing_owner_direct_contact.sql` alongside the profile upsert permission fix. When setting up a separate project, apply every migration in timestamp order.
 
-All exposed application tables use Row Level Security. Student-ID images are in the private `student-verification` bucket and are reviewed through restricted server-side functions. Listing images are in the public `listing-photos` bucket, limited to 5 MB JPG, PNG, or WebP files, so visitors and social crawlers can see listing photos. Phone and WhatsApp numbers are not selectable from `public.users`; approved peers receive them only through an RPC scoped to an active listing. Do not put a service-role or other secret key in the Flutter app.
+All exposed application tables use Row Level Security. Student-ID images are in the private `student-verification` bucket and are reviewed through restricted server-side functions. Listing images are in the public `listing-photos` bucket, limited to 5 MB JPG, PNG, or WebP files, so visitors and social crawlers can see listing photos. Phone and WhatsApp numbers are not selectable from `public.users`; approved peers receive them only through listing-scoped contact or an explicitly opted-in roommate profile, with block checks enforced by the database. Do not put a service-role or other secret key in the Flutter app.
 
 ## First reviewer setup
 

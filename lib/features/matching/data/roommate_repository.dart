@@ -5,6 +5,27 @@ const roommateProfilePhotoBucket = 'profile-photos';
 class RoommateRepository {
   const RoommateRepository();
 
+  Future<RoommateContact?> fetchContact(String peerUserId) async {
+    final response = await supabase.rpc(
+      'roommate_profile_contact',
+      params: {'p_peer_user_id': peerUserId},
+    );
+    if (response is! List) {
+      throw const FormatException(
+        'Unexpected response from roommate_profile_contact.',
+      );
+    }
+    if (response.isEmpty) return null;
+    final row = Map<String, dynamic>.from(response.first as Map);
+    final phoneNumber = row['phone_number'] as String?;
+    final whatsappNumber = row['whatsapp_number'] as String?;
+    if (phoneNumber == null && whatsappNumber == null) return null;
+    return RoommateContact(
+      phoneNumber: phoneNumber,
+      whatsappNumber: whatsappNumber,
+    );
+  }
+
   Future<bool> currentStudentIsVerified() async {
     final rows =
         await supabase.rpc('my_student_verification_state') as List<dynamic>;
@@ -56,6 +77,16 @@ class RoommateRepository {
     }
     return results;
   }
+}
+
+class RoommateContact {
+  const RoommateContact({
+    this.phoneNumber,
+    this.whatsappNumber,
+  });
+
+  final String? phoneNumber;
+  final String? whatsappNumber;
 }
 
 class RoommateProfile {

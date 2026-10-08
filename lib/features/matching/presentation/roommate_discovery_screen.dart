@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/services/supabase_service.dart';
 import '../../../core/widgets/app_button.dart';
@@ -226,7 +227,15 @@ class _RoommateDiscoveryScreenState extends State<RoommateDiscoveryScreen> {
     }
   }
 
-  void _showProfile(RoommateProfile profile) {
+  Future<void> _showProfile(RoommateProfile profile) async {
+    RoommateContact? contact;
+    String? contactError;
+    try {
+      contact = await _repository.fetchContact(profile.userId);
+    } catch (_) {
+      contactError = 'Could not load contact options. Try again later.';
+    }
+    if (!mounted) return;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -314,12 +323,62 @@ class _RoommateDiscoveryScreenState extends State<RoommateDiscoveryScreen> {
                     _connect(profile);
                   },
                 ),
+                if (contactError != null) ...[
+                  const SizedBox(height: 12),
+                  Text(contactError,
+                      style: const TextStyle(color: Colors.black54)),
+                ] else if (contact != null) ...[
+                  const SizedBox(height: 10),
+                  if (contact.phoneNumber != null)
+                    OutlinedButton.icon(
+                      onPressed: () => _openContactLink(
+                        Uri(scheme: 'tel', path: contact!.phoneNumber),
+                      ),
+                      icon: const Icon(Icons.call_outlined),
+                      label: Text('Call ${contact.phoneNumber}'),
+                    ),
+                  if (contact.whatsappNumber != null)
+                    OutlinedButton.icon(
+                      onPressed: () => _openWhatsApp(contact!.whatsappNumber!),
+                      icon: const Icon(Icons.video_call_outlined),
+                      label: Text('WhatsApp ${contact.whatsappNumber}'),
+                    ),
+                ] else ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Direct contact details are not shared for this profile. You can still connect and chat here.',
+                    style: TextStyle(color: Colors.black54, height: 1.4),
+                  ),
+                ],
               ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _openWhatsApp(String phoneNumber) async {
+    final digits = phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
+    final uri = Uri.https('wa.me', '/$digits');
+    await _openContactLink(uri);
+  }
+
+  Future<void> _openContactLink(Uri uri) async {
+    try {
+      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open this contact action.')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open this contact action.')),
+        );
+      }
+    }
   }
 
   Widget _detailRow(IconData icon, String text) => Padding(
