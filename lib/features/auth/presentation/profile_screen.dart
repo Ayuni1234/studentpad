@@ -7,6 +7,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../listings/presentation/my_listings_screen.dart';
+import '../../notifications/presentation/notifications_screen.dart';
 import 'safety_screen.dart';
 import 'verification_screen.dart';
 import 'welcome_screen.dart';
@@ -762,6 +763,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       style:
                           TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 8),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.notifications_none_rounded),
+                    title: const Text('Notifications'),
+                    subtitle: const Text('Messages and account updates'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push<void>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const NotificationsScreen(),
+                      ),
+                    ),
+                  ),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.school_outlined),
