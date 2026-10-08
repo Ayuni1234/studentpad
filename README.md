@@ -11,6 +11,7 @@ StudentPad helps university students in Ghana find off-campus housing and compat
 - Listing creation and editing, plus pause/reactivate controls in **Profile → My listings**.
 - Lifestyle profiles with university, GHS budget range, cleanliness preference, sleep schedule, and an optional roommate introduction.
 - Compatibility-ranked verified students with “Say hello” in-app chat.
+- Dedicated roommate discovery with major, graduation year, housing preferences, target locations, share-budget filters, private profile photos, and verified-student messaging.
 - Profile contact details with listing-scoped Call and WhatsApp actions, available only when both students are approved and neither has blocked the other.
 - Realtime inbox and messages, with database-enforced peer blocking and a private conversation-report workflow.
 - Reviewer screens for pending student IDs and peer reports.
@@ -85,7 +86,7 @@ The reviewer roster is private and is not writable from the app. Never promote a
 
 - `lib/features/auth/` — onboarding, verification, reviewer tools, account profile, and safety information.
 - `lib/features/listings/` — Explore feed, listing publishing, editing, and owner management.
-- `lib/features/matching/` — student setup, lifestyle preferences, and compatibility results.
+- `lib/features/matching/` — student setup, lifestyle preferences, compatibility results, and roommate discovery/profile editing.
 - `lib/features/chat/` — inbox, realtime chat, peer blocking, and reporting.
 - `lib/core/` — Supabase client configuration, app shell, shared widgets, and routing.
 - `supabase/migrations/` — schema, indexes, policies, functions, storage, and realtime setup.

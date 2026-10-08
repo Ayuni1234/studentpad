@@ -8,6 +8,7 @@ import '../../../core/services/supabase_service.dart';
 import 'premium_explore_screen.dart';
 import '../../chat/presentation/chat_screens.dart';
 import '../../matching/presentation/matches_screen.dart';
+import '../../matching/presentation/roommate_discovery_screen.dart';
 import '../../auth/presentation/profile_screen.dart';
 import '../../auth/presentation/welcome_screen.dart';
 import '../../auth/presentation/admin_dashboard_screen.dart';
@@ -34,6 +35,7 @@ class _HomeShellState extends State<HomeShell> {
       : [
           PremiumExploreScreen(onCreateListing: _openCreateListing),
           const MatchesScreen(),
+          const RoommateDiscoveryScreen(),
           const ChatsScreen(),
           NotificationsScreen(key: ValueKey(supabase.auth.currentUser?.id)),
           const ProfileScreen(),
@@ -83,7 +85,7 @@ class _HomeShellState extends State<HomeShell> {
     }
     setState(() {
       _isAdmin = false;
-      _selected = _selected > 4 ? 0 : _selected;
+      _selected = _selected > 5 ? 0 : _selected;
     });
     try {
       final allowed = await supabase.rpc('is_studentpad_admin') as bool;
@@ -167,7 +169,11 @@ class _HomeShellState extends State<HomeShell> {
                                 NavigationDestination(
                                     icon: Icon(Icons.favorite_border_rounded),
                                     selectedIcon: Icon(Icons.favorite),
-                                    label: 'Matches'),
+                                    label: 'Fit'),
+                                NavigationDestination(
+                                    icon: Icon(Icons.people_alt_outlined),
+                                    selectedIcon: Icon(Icons.people_alt),
+                                    label: 'Roommates'),
                                 NavigationDestination(
                                     icon:
                                         Icon(Icons.chat_bubble_outline_rounded),
